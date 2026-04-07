@@ -3,23 +3,16 @@
 import { useCallback, useRef, useState } from "react";
 
 import { fmt } from "@/lib/margin-engine";
-import type { Branch, PortfolioImport } from "@/lib/types";
 
 import {
   parsePortfolioImport,
-  portfolioImportToBranch,
   type PortfolioImportParseResult,
 } from "./import-parser";
 
 export interface ImportDialogProps {
   open: boolean;
   onClose: () => void;
-  onImport: (branch: Branch, imported: PortfolioImport) => void;
-  branchId?: string;
-  color?: string;
-  parentId?: string;
-  isMain?: boolean;
-  forkDate?: string;
+  onImport: (rawText: string, fileName?: string) => void;
 }
 
 const ACCEPTED_FILES = ".json,.yaml,.yml,application/json,text/yaml,text/x-yaml,application/x-yaml";
@@ -43,11 +36,6 @@ export function ImportDialog({
   open,
   onClose,
   onImport,
-  branchId,
-  color,
-  parentId,
-  isMain,
-  forkDate,
 }: ImportDialogProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -134,25 +122,13 @@ export function ImportDialog({
       return;
     }
 
-    const branch = portfolioImportToBranch(result.parsed.value, {
-      branchId,
-      color,
-      parentId,
-      isMain,
-      forkDate,
-    });
-
-    onImport(branch, result.parsed.value);
+    onImport(result.parsed.rawText, selectedFileName ?? undefined);
     handleClose();
   }, [
-    branchId,
-    color,
-    forkDate,
     handleClose,
-    isMain,
     onImport,
-    parentId,
     result,
+    selectedFileName,
   ]);
 
   if (!open) {

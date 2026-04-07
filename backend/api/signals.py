@@ -15,7 +15,7 @@ router = APIRouter(prefix="/signals", tags=["signals"])
 # When running in Docker the databases are shared via a volume mount at /app/data.
 _CANDIDATES = [
     Path(os.getenv("SIGNAL_DB_PATH", "")),
-    Path(__file__).parents[3] / "data.db",       # repo root (dev)
+    Path(__file__).parents[1] / "data.db",
     Path("/app/data/data.db"),                    # Docker volume
 ]
 
@@ -41,7 +41,24 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
             d["signals_json"] = json.loads(d["signals_json"])
         except (json.JSONDecodeError, TypeError):
             d["signals_json"] = {}
+    d.setdefault("timeframe", _get_signal_timeframe())
     return d
+
+
+def _get_signal_timeframe() -> str:
+    config_root = _get_config_root()
+    if not config_root:
+        return "hourly"
+
+    global_cfg = config_root / "global.yaml"
+    if not global_cfg.exists():
+        return "hourly"
+
+    import yaml
+
+    with open(global_cfg) as f:
+        config = yaml.safe_load(f) or {}
+    return str(config.get("strategy", {}).get("timeframe", "hourly")).lower()
 
 
 @router.get("/active")
@@ -59,13 +76,18 @@ def get_active_signals(
         cur = conn.cursor()
 
         # Latest signal per (asset, direction) in the last 24h
+        cutoff_ms = int(__import__("time").time() * 1000) - 24 * 60 * 60 * 1000
         sql = """
             SELECT tc.*
             FROM trade_candidates tc
             INNER JOIN (
                 SELECT asset, direction, MAX(ts) AS max_ts
                 FROM trade_candidates
-                WHERE ts >= datetime('now', '-24 hours')
+                WHERE (
+                    (typeof(ts) = 'integer' AND ts >= ?)
+                    OR
+                    (typeof(ts) = 'text' AND ts >= datetime('now', '-24 hours'))
+                )
                 {asset_filter}
                 GROUP BY asset, direction
             ) latest ON tc.asset = latest.asset
@@ -77,7 +99,10 @@ def get_active_signals(
         asset_filter = "AND asset = ?" if asset else ""
         sql = sql.format(asset_filter=asset_filter)
 
-        params = ([asset, limit] if asset else [limit])
+        params = [cutoff_ms]
+        if asset:
+            params.append(asset)
+        params.append(limit)
         cur.execute(sql, params)
         rows = [_row_to_dict(r) for r in cur.fetchall()]
         conn.close()
@@ -130,7 +155,7 @@ def get_signal_history(
 
 def _get_config_root() -> Optional[Path]:
     candidates = [
-        Path(__file__).parents[3] / "config",  # repo root dev
+        Path(__file__).parents[1] / "config",
         Path("/app/config"),                    # Docker
     ]
     return next((p for p in candidates if p.exists()), None)

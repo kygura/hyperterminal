@@ -1,11 +1,3 @@
-"""
-Telegram bot wrapper using python-telegram-bot (async).
-
-Sends alerts, startup/shutdown confirmations, and periodic health checks.
-Retries transient failures (timeouts, rate limits) up to 3×.
-Non-transient errors (bad token) disable Telegram — daemon keeps running.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -15,11 +7,10 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-_TRANSIENT_CODES = {429}  # rate limit; also retry on TimeoutError
-
 try:
     from telegram import Bot
-    from telegram.error import TelegramError, NetworkError, TimedOut, RetryAfter
+    from telegram.error import NetworkError, RetryAfter, TelegramError, TimedOut
+
     _TELEGRAM_AVAILABLE = True
 except ImportError:
     _TELEGRAM_AVAILABLE = False
@@ -27,33 +18,33 @@ except ImportError:
 
 
 class TelegramBot:
-    """Sends messages to a Telegram chat. Gracefully degrades on errors."""
-
-    def __init__(self, token: str, chat_id: str) -> None:
-        self._token = token
+    def __init__(self, token: str, chat_id: str, min_interval_seconds: float = 10.0) -> None:
         self._chat_id = str(chat_id)
-        self._bot: Optional[object] = None
         self._disabled = False
+        self._bot: Optional[Bot] = None
+        self._min_interval_seconds = max(float(min_interval_seconds), 0.0)
+        self._last_sent_at = 0.0
         self._start_time = time.time()
 
         if not _TELEGRAM_AVAILABLE:
             self._disabled = True
             return
+
         try:
             self._bot = Bot(token=token)
         except Exception as exc:
             logger.error("TelegramBot: failed to instantiate Bot: %s", exc)
             self._disabled = True
 
-    # ------------------------------------------------------------------
-    # Internal send with retry
-    # ------------------------------------------------------------------
+    async def _wait_for_slot(self) -> None:
+        if self._min_interval_seconds <= 0:
+            return
+
+        remaining = self._min_interval_seconds - (time.monotonic() - self._last_sent_at)
+        if remaining > 0:
+            await asyncio.sleep(remaining)
 
     async def _send(self, text: str, disable_notification: bool = False) -> bool:
-        """
-        Send a message, retry transient failures up to 3×.
-        Returns True on success, False on non-transient error.
-        """
         if self._disabled or self._bot is None:
             return False
 
@@ -62,24 +53,23 @@ class TelegramBot:
 
         for attempt in range(1, max_retries + 1):
             try:
+                await self._wait_for_slot()
                 await self._bot.send_message(
                     chat_id=self._chat_id,
                     text=text,
                     parse_mode="HTML",
                     disable_notification=disable_notification,
                 )
+                self._last_sent_at = time.monotonic()
                 return True
             except RetryAfter as exc:
-                wait = exc.retry_after + 1
-                logger.warning(
-                    "TelegramBot: rate limited, retry in %ds (attempt %d/%d)",
-                    wait, attempt, max_retries,
-                )
-                await asyncio.sleep(wait)
+                await asyncio.sleep(exc.retry_after + 1)
             except (TimedOut, NetworkError) as exc:
                 logger.warning(
                     "TelegramBot: transient error (attempt %d/%d): %s",
-                    attempt, max_retries, exc,
+                    attempt,
+                    max_retries,
+                    exc,
                 )
                 await asyncio.sleep(backoff)
             except TelegramError as exc:
@@ -94,25 +84,20 @@ class TelegramBot:
         logger.error("TelegramBot: max retries exceeded, message dropped")
         return False
 
-    # ------------------------------------------------------------------
-    # Public methods
-    # ------------------------------------------------------------------
-
     async def send_alert(self, message: str, priority: str) -> None:
-        disable = priority == "LOW"
-        success = await self._send(message, disable_notification=disable)
+        success = await self._send(message, disable_notification=(priority == "LOW"))
         if success:
             logger.info("TelegramBot: alert sent [%s]", priority)
 
     async def send_startup_message(self, assets: list[str], signals: list[str]) -> None:
         asset_str = ", ".join(assets)
-        signal_str = "\n".join(f"  • {s}" for s in signals)
+        signal_str = "\n".join(f"  • {signal}" for signal in signals)
         msg = (
             "🚀 <b>hl-signal-daemon online</b>\n\n"
             f"<b>Assets:</b> {asset_str}\n"
             f"<b>Signals:</b>\n{signal_str}"
         )
-        await self._send(msg, disable_notification=False)
+        await self._send(msg)
 
     async def send_shutdown_message(self) -> None:
         uptime_s = int(time.time() - self._start_time)
@@ -148,13 +133,5 @@ class TelegramBot:
                 f"snaps={snap_counts.get(coin, 0)} "
                 f"trades={trade_counts.get(coin, 0)}"
             )
-        liq = data_counts.get("liquidations", 0)
-        lines.append(f"  Liquidations: {liq}")
+        lines.append(f"  Liquidations: {data_counts.get('liquidations', 0)}")
         await self._send("\n".join(lines), disable_notification=True)
-
-    async def send_ws_warning(self, ws_name: str, failures: int) -> None:
-        msg = (
-            f"⚠️ <b>WebSocket Warning</b>\n"
-            f"Channel <code>{ws_name}</code> has had {failures} consecutive failures."
-        )
-        await self._send(msg, disable_notification=False)

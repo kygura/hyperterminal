@@ -23,29 +23,11 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      ENABLE_MOCK_SIGNALS: ${ENABLE_MOCK_SIGNALS:-true}
       PYTHONUNBUFFERED: "1"
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app/backend
-      - ./data:/app/data
-
-  signal-daemon:
-    build:
-      context: .
-      dockerfile: signal-daemon/Dockerfile
-    depends_on:
-      backend:
-        condition: service_started
-    environment:
-      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
-      SIGNAL_JSONL_PATH: /app/data/signals.jsonl
-      PYTHONUNBUFFERED: "1"
-    volumes:
-      - ./signal-daemon:/app/signal-daemon
       - ./data:/app/data
 
 volumes:

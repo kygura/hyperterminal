@@ -42,7 +42,37 @@ from data.bybit_client import BybitClient
 from db.store import SQLiteDataStore
 from engine.signal_engine import SignalEngine, TradeCandidate
 from alerts import AlertManager
-from telegram import TelegramBot
+from telegram_bot import TelegramBot
+
+_TIMEFRAME_PROFILES = {
+    "hourly": {
+        "context_poll_seconds": 300,
+        "funding_poll_seconds": 3600,
+        "bybit_ohlcv_seconds": 3600,
+        "bybit_oi_seconds": 3600,
+        "bybit_volume_seconds": 3600,
+        "tick_interval_seconds": 3600,
+        "cooldown_seconds": 3600,
+    },
+    "daily": {
+        "context_poll_seconds": 1800,
+        "funding_poll_seconds": 21600,
+        "bybit_ohlcv_seconds": 21600,
+        "bybit_oi_seconds": 21600,
+        "bybit_volume_seconds": 21600,
+        "tick_interval_seconds": 86400,
+        "cooldown_seconds": 86400,
+    },
+    "weekly": {
+        "context_poll_seconds": 21600,
+        "funding_poll_seconds": 86400,
+        "bybit_ohlcv_seconds": 86400,
+        "bybit_oi_seconds": 86400,
+        "bybit_volume_seconds": 86400,
+        "tick_interval_seconds": 604800,
+        "cooldown_seconds": 604800,
+    },
+}
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -112,6 +142,61 @@ def validate_config(global_config: dict, dry_run: bool) -> None:
         sys.exit(1)
 
     logger.info("Config validation passed")
+
+
+def resolve_runtime_settings(global_config: dict) -> dict:
+    strategy = global_config.get("strategy", {})
+    timeframe = str(strategy.get("timeframe", "hourly")).strip().lower()
+    if timeframe not in _TIMEFRAME_PROFILES:
+        timeframe = "hourly"
+
+    polling = global_config.get("polling", {})
+    engine = global_config.get("engine", {})
+    alerts = global_config.get("alerts", {})
+    profile = _TIMEFRAME_PROFILES[timeframe]
+
+    def resolved(section: dict, key: str) -> int:
+        configured = section.get(key)
+        minimum = int(profile[key])
+        if configured is None:
+            return minimum
+        return max(int(configured), minimum)
+
+    return {
+        "timeframe": timeframe,
+        "context_poll_seconds": resolved(polling, "context_poll_seconds"),
+        "funding_poll_seconds": resolved(polling, "funding_poll_seconds"),
+        "bybit_ohlcv_seconds": resolved(polling, "bybit_ohlcv_seconds"),
+        "bybit_oi_seconds": resolved(polling, "bybit_oi_seconds"),
+        "bybit_volume_seconds": resolved(polling, "bybit_volume_seconds"),
+        "tick_interval_seconds": resolved(engine, "tick_interval_seconds"),
+        "cooldown_seconds": max(
+            int(alerts.get("cooldown_seconds", profile["cooldown_seconds"])),
+            int(profile["cooldown_seconds"]),
+        ),
+        "telegram_min_interval_seconds": max(
+            float(alerts.get("telegram_min_interval_seconds", 10)),
+            10.0,
+        ),
+    }
+
+
+def serialize_candidate(candidate: TradeCandidate, timeframe: str) -> dict:
+    price = candidate.vwap_state.get("current_price") if candidate.vwap_state else None
+    vwap = candidate.vwap_state.get("vwap") if candidate.vwap_state else None
+    return {
+        "id": candidate.alert_id,
+        "ts": int(candidate.timestamp * 1000),
+        "asset": candidate.coin,
+        "direction": candidate.direction,
+        "regime": candidate.regime,
+        "conviction": candidate.conviction,
+        "signal_count": len(candidate.signals),
+        "signals_json": [signal.signal_name for signal in candidate.signals],
+        "price": price,
+        "vwap": vwap,
+        "timeframe": timeframe,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +414,8 @@ async def engine_tick_loop(
     tick_interval_s: int,
     stop_event: asyncio.Event,
     dry_run: bool,
+    timeframe: str,
+    on_candidate=None,
 ) -> None:
     logger.info("Starting engine tick loop every %ds", tick_interval_s)
     while not stop_event.is_set():
@@ -366,6 +453,12 @@ async def engine_tick_loop(
                     )
                 except Exception as exc:
                     logger.error("Failed to log trade candidate: %s", exc)
+
+                if on_candidate is not None:
+                    try:
+                        await on_candidate(serialize_candidate(candidate, timeframe))
+                    except Exception as exc:
+                        logger.error("Failed to broadcast trade candidate: %s", exc)
 
                 # Send Telegram for MEDIUM/HIGH
                 if send_telegram:
@@ -517,14 +610,14 @@ async def main(args: argparse.Namespace) -> None:
     validate_config(global_config, dry_run)
 
     coins: list[str] = global_config["assets"]
-    polling = global_config["polling"]
-    context_poll_s: int = polling.get("context_poll_seconds", 10)
-    funding_poll_s: int = polling.get("funding_poll_seconds", 60)
-    bybit_ohlcv_s: int = polling.get("bybit_ohlcv_seconds", 3600)    # hourly
-    bybit_oi_s: int = polling.get("bybit_oi_seconds", 3600)           # hourly
-    bybit_vol_s: int = polling.get("bybit_volume_seconds", 3600)      # hourly
-    tick_s: int = global_config.get("engine", {}).get("tick_interval_seconds", 30)
-    cooldown_s: int = global_config.get("alerts", {}).get("cooldown_seconds", 300)
+    runtime_settings = resolve_runtime_settings(global_config)
+    context_poll_s = runtime_settings["context_poll_seconds"]
+    funding_poll_s = runtime_settings["funding_poll_seconds"]
+    bybit_ohlcv_s = runtime_settings["bybit_ohlcv_seconds"]
+    bybit_oi_s = runtime_settings["bybit_oi_seconds"]
+    bybit_vol_s = runtime_settings["bybit_volume_seconds"]
+    tick_s = runtime_settings["tick_interval_seconds"]
+    cooldown_s = runtime_settings["cooldown_seconds"]
     health_s: int = global_config.get("health_check", {}).get("interval_seconds", 21600)
     lookback_hours: int = 48
 
@@ -538,14 +631,21 @@ async def main(args: argparse.Namespace) -> None:
     )
     store = SQLiteDataStore(db_path=db_path)
     engine = SignalEngine(config_dir="config", global_config=global_config, store=store)
-    alert_manager = AlertManager(cooldown_seconds=cooldown_s)
+    alert_manager = AlertManager(
+        cooldown_seconds=cooldown_s,
+        cadence=runtime_settings["timeframe"],
+    )
 
     telegram: Optional[TelegramBot] = None
     if not dry_run:
         token = os.getenv("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
         if token and token not in ("not_yet",):
-            telegram = TelegramBot(token=token, chat_id=chat_id)
+            telegram = TelegramBot(
+                token=token,
+                chat_id=chat_id,
+                min_interval_seconds=runtime_settings["telegram_min_interval_seconds"],
+            )
 
     await hl_client.start()
     await bybit_client.start()
@@ -597,7 +697,17 @@ async def main(args: argparse.Namespace) -> None:
         ),
         # Engine
         asyncio.create_task(
-            engine_tick_loop(engine, alert_manager, store, telegram, coins, tick_s, stop_event, dry_run),
+            engine_tick_loop(
+                engine,
+                alert_manager,
+                store,
+                telegram,
+                coins,
+                tick_s,
+                stop_event,
+                dry_run,
+                runtime_settings["timeframe"],
+            ),
             name="engine_tick",
         ),
         # Diagnostics

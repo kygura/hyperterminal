@@ -310,7 +310,38 @@ const validatePortfolioImport = (
     };
   }
 
-  const portfolioValue = value.portfolio;
+  const portfolioValue = (() => {
+    if ("portfolio" in value) {
+      return value.portfolio;
+    }
+
+    const branchValue = value.branch;
+    if (!isRecord(branchValue)) {
+      return undefined;
+    }
+
+    return {
+      name: branchValue.name,
+      balance: branchValue.balance,
+      positions: Array.isArray(branchValue.positions)
+        ? branchValue.positions.map((position) =>
+            isRecord(position)
+              ? {
+                  asset: position.asset,
+                  direction: position.direction,
+                  mode: position.mode,
+                  leverage: position.leverage,
+                  margin: position.margin,
+                  entry_date: position.entry_date,
+                  entry_price: position.entry_price,
+                  exit_date: position.exit_date,
+                  exit_price: position.exit_price,
+                }
+              : position,
+          )
+        : branchValue.positions,
+    };
+  })();
 
   if (!isRecord(portfolioValue)) {
     return {

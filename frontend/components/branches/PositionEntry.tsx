@@ -8,8 +8,6 @@ import { ASSETS, Position } from "@/lib/types";
 
 const FALLBACK_MAX_LEVERAGE = 20;
 const DEFAULT_MARGIN = 1_000;
-const DATE_FALLBACK_INDEX = Math.max(0, OHLC_DATES.length - 14);
-const DEFAULT_ENTRY_DATE = OHLC_DATES[DATE_FALLBACK_INDEX] ?? OHLC_DATES[0] ?? "";
 
 const joinClasses = (...values: Array<string | false | null | undefined>): string =>
   values.filter(Boolean).join(" ");
@@ -23,6 +21,11 @@ const priceFor = (asset: string, date: string): number => {
   }
 
   return closeAt(asset, date);
+};
+
+const defaultEntryDate = (): string => {
+  const fallbackIndex = Math.max(0, OHLC_DATES.length - 14);
+  return OHLC_DATES[fallbackIndex] ?? OHLC_DATES[0] ?? "";
 };
 
 export interface PositionEntryDraft {
@@ -40,7 +43,7 @@ export interface PositionEntryMetrics {
   exitPrice?: number;
   markPrice: number;
   liquidationPrice: number;
-  orderValue: number;
+  notional: number;
   marginRequired: number;
   maintenance: number;
   qty: number;
@@ -76,7 +79,7 @@ const defaultDraft = (overrides?: Partial<PositionEntryDraft>): PositionEntryDra
   mode: overrides?.mode ?? "Cross",
   leverage: overrides?.leverage ?? 10,
   margin: overrides?.margin ?? DEFAULT_MARGIN,
-  entryDate: overrides?.entryDate ?? DEFAULT_ENTRY_DATE,
+  entryDate: overrides?.entryDate ?? defaultEntryDate(),
   exitDate: overrides?.exitDate ?? "",
 });
 
@@ -99,10 +102,11 @@ export default function PositionEntry({
   const [draft, setDraft] = useState<PositionEntryDraft>(() => defaultDraft(defaultValues));
   const [showLeverageSlider, setShowLeverageSlider] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const latestDate = OHLC_DATES[OHLC_DATES.length - 1] ?? "";
 
   useEffect(() => {
     setDraft(defaultDraft(defaultValues));
-  }, [defaultValues]);
+  }, [defaultValues, latestDate]);
 
   const assets = useMemo(() => {
     const source = assetOptions?.length ? assetOptions : OHLC_ASSETS;
@@ -156,7 +160,7 @@ export default function PositionEntry({
       exitPrice,
       markPrice: priceFor(draft.asset, OHLC_DATES[OHLC_DATES.length - 1] ?? draft.entryDate),
       liquidationPrice: previewState?.liqPrice ?? 0,
-      orderValue: previewState?.notional ?? draft.margin * draft.leverage,
+      notional: previewState?.notional ?? draft.margin * draft.leverage,
       marginRequired: draft.margin,
       maintenance: previewState?.maintenanceMargin ?? 0,
       qty: previewState?.qty ?? 0,
@@ -218,7 +222,7 @@ export default function PositionEntry({
         <div>
           <p className="section-header">Position entry</p>
           <p className="mono-data mt-2 text-xs text-[--text-secondary]">
-            Build a branch position with live margin math.
+            Build a branch position with margin as collateral and notional derived from leverage.
           </p>
         </div>
         <span className="mono-data text-xs text-[--text-secondary]">
@@ -429,9 +433,9 @@ export default function PositionEntry({
             </p>
           </div>
           <div>
-            <p className="ui-label">Order value</p>
+            <p className="ui-label">Notional</p>
             <p className="mono-data mt-2 text-sm text-[--text-primary]">
-              ${fmt(metrics.orderValue)}
+              ${fmt(metrics.notional)}
             </p>
           </div>
           <div>

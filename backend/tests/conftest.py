@@ -63,7 +63,12 @@ def tmp_db(tmp_path):
             is_main INTEGER DEFAULT 0,
             parent_id TEXT,
             fork_date TEXT NOT NULL,
+            initial_capital REAL DEFAULT 10000,
             balance REAL DEFAULT 10000,
+            source_wallet_id TEXT,
+            source_type TEXT,
+            source_path TEXT,
+            source_mtime REAL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
         );
@@ -79,7 +84,28 @@ def tmp_db(tmp_path):
             entry_date TEXT NOT NULL,
             entry_price REAL NOT NULL,
             exit_date TEXT,
+            exit_price REAL,
             created_at TEXT NOT NULL,
+            FOREIGN KEY(branch_id) REFERENCES portfolio_branches(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS branch_trades (
+            id TEXT PRIMARY KEY,
+            branch_id TEXT NOT NULL,
+            coin TEXT NOT NULL,
+            side TEXT NOT NULL,
+            size REAL NOT NULL,
+            leverage REAL DEFAULT 1,
+            margin REAL,
+            mode TEXT DEFAULT 'Cross',
+            entry_px REAL NOT NULL,
+            close_px REAL,
+            entry_date TEXT NOT NULL,
+            exit_date TEXT,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
             FOREIGN KEY(branch_id) REFERENCES portfolio_branches(id)
         );
     """)

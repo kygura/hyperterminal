@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import AccountBar from "@/components/branches/AccountBar";
 import BranchSidebar from "@/components/branches/BranchSidebar";
@@ -20,94 +20,88 @@ import PositionEntry, {
 } from "@/components/branches/PositionEntry";
 import PositionRow from "@/components/branches/PositionRow";
 import {
+  addBranchPosition,
+  createForkBranch,
+  deleteBranchPosition,
+  fetchBranches,
+  importBranchFile,
+  updateBranch,
+  updateBranchPosition,
+} from "@/lib/branches-api";
+import {
   accountStateAt,
   computeAllBranches,
   posStateAt,
 } from "@/lib/margin-engine";
-import { closeAt, OHLC_ASSETS, OHLC_DATES } from "@/lib/price-data";
+import {
+  OHLC_ASSETS,
+  OHLC_DATES,
+  setOhlcDataset,
+  type OhlcDataset,
+} from "@/lib/price-data";
 import type { Branch, Position } from "@/lib/types";
+import { resolveApiUrl } from "@/lib/ws";
 
 const BRANCH_COLORS = ["#ed3602", "#38a67c", "#627eea", "#f7931a", "#9945ff", "#50d2c1"];
-const LATEST_DATE = OHLC_DATES[OHLC_DATES.length - 1] ?? "";
-
-const createId = (prefix: string): string =>
-  globalThis.crypto?.randomUUID?.() ??
-  `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
-
-const dateFromEnd = (offset: number): string =>
-  OHLC_DATES[Math.max(0, OHLC_DATES.length - 1 - offset)] ?? OHLC_DATES[0] ?? "";
-
-const createSeedPosition = (
-  config: Omit<Position, "id" | "entryPrice"> & { exitDate?: string },
-): Position => ({
-  ...config,
-  id: createId("pos"),
-  entryPrice: closeAt(config.asset, config.entryDate),
-  exitPrice: config.exitDate ? closeAt(config.asset, config.exitDate) : undefined,
-});
-
-const createInitialBranches = (): Branch[] => [
-  {
-    id: createId("branch"),
-    name: "Main Portfolio",
-    color: BRANCH_COLORS[0],
-    isMain: true,
-    forkDate: dateFromEnd(120),
-    balance: 100_000,
-    positions: [
-      createSeedPosition({
-        asset: "BTC",
-        direction: "Long",
-        mode: "Cross",
-        leverage: 8,
-        margin: 12_000,
-        entryDate: dateFromEnd(95),
-      }),
-      createSeedPosition({
-        asset: "ETH",
-        direction: "Short",
-        mode: "Isolated",
-        leverage: 5,
-        margin: 7_500,
-        entryDate: dateFromEnd(72),
-        exitDate: dateFromEnd(38),
-      }),
-      createSeedPosition({
-        asset: "SOL",
-        direction: "Long",
-        mode: "Cross",
-        leverage: 6,
-        margin: 9_000,
-        entryDate: dateFromEnd(28),
-      }),
-    ],
-  },
-];
-
-const duplicatePosition = (position: Position): Position => ({
-  ...position,
-  id: createId("pos"),
-});
+const BRANCH_POLL_MS = 5000;
 
 export default function BranchesPage() {
-  const [branches, setBranches] = useState<Branch[]>(() => createInitialBranches());
-  const [selectedBranchIdx, setSelectedBranchIdx] = useState(0);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<BranchTab>("positions");
   const [showFork, setShowFork] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showFund, setShowFund] = useState(false);
+  const [, setPriceDataVersion] = useState(0);
 
-  const branchData = useMemo(() => computeAllBranches(branches), [branches]);
+  const refreshBranches = useCallback(async () => {
+    const nextBranches = await fetchBranches();
+    setBranches(nextBranches);
+    setSelectedBranchId((current) =>
+      current && nextBranches.some((branch) => branch.id === current)
+        ? current
+        : nextBranches[0]?.id ?? null,
+    );
+  }, []);
 
   useEffect(() => {
-    setSelectedBranchIdx((current) =>
-      branches.length === 0 ? 0 : Math.min(current, branches.length - 1),
-    );
-  }, [branches.length]);
+    const controller = new AbortController();
 
-  const selectedBranch = branches[selectedBranchIdx] ?? branches[0] ?? null;
-  const selectedMetrics = branchData[selectedBranchIdx] ?? branchData[0] ?? null;
-  const evaluationDate = LATEST_DATE || selectedBranch?.forkDate || "";
+    void fetch(`${resolveApiUrl()}/api/branches/price-history?timeframe=1d`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`price history request failed: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((payload: OhlcDataset) => {
+        if (!payload || typeof payload !== "object" || !payload.assets) {
+          return;
+        }
+        setOhlcDataset(payload);
+        setPriceDataVersion((current) => current + 1);
+      })
+      .catch(() => undefined);
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    void refreshBranches();
+    const intervalId = window.setInterval(() => {
+      void refreshBranches();
+    }, BRANCH_POLL_MS);
+    return () => window.clearInterval(intervalId);
+  }, [refreshBranches]);
+
+  const latestDate = OHLC_DATES[OHLC_DATES.length - 1] ?? "";
+  const branchData = useMemo(() => computeAllBranches(branches), [branches]);
+  const selectedBranch = branches.find((branch) => branch.id === selectedBranchId) ?? branches[0] ?? null;
+  const selectedMetrics =
+    branchData.find((metric) => metric.branch.id === selectedBranch?.id) ?? branchData[0] ?? null;
+  const evaluationDate = latestDate || selectedBranch?.forkDate || "";
 
   const selectedAccount = useMemo(
     () => (selectedBranch ? accountStateAt(selectedBranch, evaluationDate) : null),
@@ -127,102 +121,90 @@ export default function BranchesPage() {
     [evaluationDate, selectedBranch],
   );
 
-  const selectBranch = (branchId: string): void => {
-    const nextIndex = branches.findIndex((branch) => branch.id === branchId);
-
-    if (nextIndex === -1) {
-      return;
-    }
-
-    setSelectedBranchIdx(nextIndex);
+  const selectBranch = useCallback((branchId: string) => {
+    setSelectedBranchId(branchId);
     setShowFork(false);
     setShowFund(false);
-  };
+  }, []);
 
-  const updateSelectedBranch = (updater: (branch: Branch) => Branch): void => {
-    setBranches((current) =>
-      current.map((branch, index) =>
-        index === selectedBranchIdx ? updater(branch) : branch,
-      ),
-    );
-  };
+  const handleAddPosition = useCallback(
+    async (payload: PositionEntrySubmit) => {
+      if (!selectedBranch) {
+        return;
+      }
+      await addBranchPosition(selectedBranch.id, payload);
+      await refreshBranches();
+      setActiveTab("positions");
+    },
+    [refreshBranches, selectedBranch],
+  );
 
-  const handleAddPosition = (payload: PositionEntrySubmit): void => {
-    updateSelectedBranch((branch) => ({
-      ...branch,
-      positions: [
-        ...branch.positions,
-        {
-          ...payload,
-          id: createId("pos"),
-        },
-      ],
-    }));
-    setActiveTab("positions");
-  };
+  const handleUpdatePosition = useCallback(
+    async (updatedPosition: Position) => {
+      if (!selectedBranch) {
+        return;
+      }
+      await updateBranchPosition(selectedBranch.id, updatedPosition);
+      await refreshBranches();
+    },
+    [refreshBranches, selectedBranch],
+  );
 
-  const handleUpdatePosition = (updatedPosition: Position): void => {
-    updateSelectedBranch((branch) => ({
-      ...branch,
-      positions: branch.positions.map((position) =>
-        position.id === updatedPosition.id ? updatedPosition : position,
-      ),
-    }));
-  };
+  const handleRemovePosition = useCallback(
+    async (positionId: string) => {
+      if (!selectedBranch) {
+        return;
+      }
+      await deleteBranchPosition(selectedBranch.id, positionId);
+      await refreshBranches();
+    },
+    [refreshBranches, selectedBranch],
+  );
 
-  const handleRemovePosition = (positionId: string): void => {
-    updateSelectedBranch((branch) => ({
-      ...branch,
-      positions: branch.positions.filter((position) => position.id !== positionId),
-    }));
-  };
-
-  const handleFund = ({ action, amount }: FundDialogSubmit): void => {
-    updateSelectedBranch((branch) => ({
-      ...branch,
-      balance:
+  const handleFund = useCallback(
+    async ({ action, amount }: FundDialogSubmit) => {
+      if (!selectedBranch) {
+        return;
+      }
+      const nextBalance =
         action === "add"
-          ? branch.balance + amount
-          : Math.max(0, branch.balance - amount),
-    }));
-    setShowFund(false);
-  };
+          ? selectedBranch.balance + amount
+          : Math.max(0, selectedBranch.balance - amount);
+      await updateBranch(selectedBranch.id, { balance: nextBalance });
+      await refreshBranches();
+      setShowFund(false);
+    },
+    [refreshBranches, selectedBranch],
+  );
 
-  const handleCreateFork = ({ balance, forkDate, name }: ForkConfigSubmit): void => {
-    if (!selectedBranch) {
-      return;
-    }
+  const handleCreateFork = useCallback(
+    async ({ balance, name }: ForkConfigSubmit) => {
+      if (!selectedBranch) {
+        return;
+      }
+      const created = await createForkBranch({
+        name,
+        color: BRANCH_COLORS[branches.length % BRANCH_COLORS.length],
+        balance,
+        parentId: selectedBranch.id,
+      });
+      await refreshBranches();
+      setSelectedBranchId(created.id);
+      setShowFork(false);
+      setActiveTab("positions");
+    },
+    [branches.length, refreshBranches, selectedBranch],
+  );
 
-    const nextBranch: Branch = {
-      id: createId("branch"),
-      name,
-      color: BRANCH_COLORS[branches.length % BRANCH_COLORS.length],
-      isMain: false,
-      parentId: selectedBranch.id,
-      forkDate,
-      balance,
-      positions: selectedBranch.positions
-        .filter((position) => posStateAt(position, forkDate).isActive)
-        .map((position) => duplicatePosition(position)),
-    };
-
-    setBranches((current) => [...current, nextBranch]);
-    setSelectedBranchIdx(branches.length);
-    setShowFork(false);
-    setActiveTab("positions");
-  };
-
-  const handleImportBranch = (branch: Branch): void => {
-    const nextBranch = {
-      ...branch,
-      id: branch.id || createId("branch"),
-      color: branch.color || BRANCH_COLORS[branches.length % BRANCH_COLORS.length],
-    };
-
-    setBranches((current) => [...current, nextBranch]);
-    setSelectedBranchIdx(branches.length);
-    setActiveTab("positions");
-  };
+  const handleImportBranch = useCallback(
+    async (rawText: string, fileName?: string) => {
+      const imported = await importBranchFile(rawText, fileName);
+      await refreshBranches();
+      setSelectedBranchId(imported.id);
+      setActiveTab("positions");
+    },
+    [refreshBranches],
+  );
 
   const tabOptions = [
     { id: "positions" as const, label: "Positions", count: selectedBranch?.positions.length ?? 0 },
@@ -240,7 +222,7 @@ export default function BranchesPage() {
           </h1>
         </div>
         <p className="mono-data text-xs text-[--text-secondary]">
-          {selectedBranch ? `${selectedBranch.name} · ${selectedBranch.positions.length} positions` : "No branch selected"}
+          {selectedBranch ? `${selectedBranch.name} · ${selectedBranch.positions.length} positions` : "Loading branches"}
         </p>
       </header>
 
@@ -285,7 +267,9 @@ export default function BranchesPage() {
 
               <PositionEntry
                 assetOptions={OHLC_ASSETS}
-                onSubmit={handleAddPosition}
+                onSubmit={(payload) => {
+                  void handleAddPosition(payload);
+                }}
               />
             </>
           ) : null}
@@ -305,11 +289,13 @@ export default function BranchesPage() {
                 <>
                   {showFork ? (
                     <ForkConfig
-                      defaultDate={LATEST_DATE || selectedBranch.forkDate}
+                      defaultDate={latestDate || selectedBranch.forkDate}
                       defaultName={`${selectedBranch.name} Fork`}
                       parentBranch={selectedBranch}
                       onCancel={() => setShowFork(false)}
-                      onCreate={handleCreateFork}
+                      onCreate={(payload) => {
+                        void handleCreateFork(payload);
+                      }}
                     />
                   ) : null}
 
@@ -317,7 +303,9 @@ export default function BranchesPage() {
                     <FundDialog
                       accountState={selectedAccount}
                       onCancel={() => setShowFund(false)}
-                      onSubmit={handleFund}
+                      onSubmit={(payload) => {
+                        void handleFund(payload);
+                      }}
                     />
                   ) : null}
 
@@ -328,8 +316,12 @@ export default function BranchesPage() {
                           key={position.id}
                           assetOptions={OHLC_ASSETS}
                           evaluationDate={evaluationDate}
-                          onRemove={handleRemovePosition}
-                          onUpdate={handleUpdatePosition}
+                          onRemove={(positionId) => {
+                            void handleRemovePosition(positionId);
+                          }}
+                          onUpdate={(positionToSave) => {
+                            void handleUpdatePosition(positionToSave);
+                          }}
                           position={position}
                           state={selectedPositionStates[position.id]}
                         />
@@ -371,7 +363,9 @@ export default function BranchesPage() {
       <ImportDialog
         open={showImport}
         onClose={() => setShowImport(false)}
-        onImport={(branch) => handleImportBranch(branch)}
+        onImport={(rawText, fileName) => {
+          void handleImportBranch(rawText, fileName);
+        }}
       />
     </section>
   );

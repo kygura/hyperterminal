@@ -9,13 +9,17 @@ import pytest
 from datetime import datetime, timezone
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 
 # ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def patch_branches_db(tmp_db, monkeypatch):
+def patch_branches_db(tmp_db, tmp_path, monkeypatch):
     monkeypatch.setenv("BRANCHES_DB_PATH", str(tmp_db))
+    branches_dir = tmp_path / "branches"
+    branches_dir.mkdir()
+    monkeypatch.setenv("BRANCHES_YAML_DIR", str(branches_dir))
 
 
 @pytest.fixture()
@@ -35,6 +39,39 @@ def _seed_main(tmp_db):
     )
     conn.commit()
     conn.close()
+
+
+def _write_price_csv(directory: Path, filename: str, rows: list[tuple[str, float, float, float, float, float]]):
+    filepath = directory / filename
+    with filepath.open("w", encoding="utf-8") as handle:
+        handle.write("date,open,high,low,close,volume\n")
+        for date, open_price, high_price, low_price, close_price, volume in rows:
+            handle.write(
+                f"{date},{open_price},{high_price},{low_price},{close_price},{volume}\n"
+            )
+
+
+def _write_price_config(path: Path, cutoff_date: str):
+    path.write_text(
+        "\n".join(
+            [
+                "price_history:",
+                f"  cutoff_date: \"{cutoff_date}\"",
+                "  hydration_timeframes:",
+                "    - 1h",
+                "    - 4h",
+                "    - 1d",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_branch_yaml(path: Path, body: str):
+    import textwrap
+
+    path.write_text(textwrap.dedent(body).strip() + "\n", encoding="utf-8")
 
 
 # ─── GET /branches ────────────────────────────────────────────────────────────
@@ -256,3 +293,314 @@ class TestPositions:
         _seed_main(tmp_db)
         resp = client.delete("/branches/main/positions/nonexistent-pos-id")
         assert resp.status_code == 200
+
+
+class TestPriceHistory:
+    def test_price_history_uses_csv_only_before_global_cutoff(self, client, tmp_path, monkeypatch):
+        price_dir = tmp_path / "prices"
+        price_dir.mkdir()
+        config_path = tmp_path / "global.yaml"
+        _write_price_config(config_path, "2024-01-03T00:00:00+00:00")
+        _write_price_csv(
+            price_dir,
+            "BTCUSD_MAX_1DAY_FROM_PERPLEXITY.csv",
+            [
+                ("2024-01-01T00:00:00+00:00", 100.0, 110.0, 95.0, 105.0, 1000.0),
+                ("2024-01-02T00:00:00+00:00", 105.0, 115.0, 101.0, 112.0, 1200.0),
+                ("2024-01-03T00:00:00+00:00", 112.0, 116.0, 108.0, 114.0, 1400.0),
+            ],
+        )
+        monkeypatch.setenv("PRICE_DATA_DIR", str(price_dir))
+        monkeypatch.setenv("PRICE_HISTORY_CONFIG_PATH", str(config_path))
+        monkeypatch.setenv("PRICE_HISTORY_DISABLE_LIVE_SYNC", "1")
+
+        resp = client.get("/branches/price-history?assets=BTC")
+        assert resp.status_code == 200
+
+        payload = resp.json()
+        assert list(payload["assets"]) == ["BTC"]
+        assert [candle["date"] for candle in payload["assets"]["BTC"]] == [
+            "2024-01-01",
+            "2024-01-02",
+        ]
+        assert payload["assets"]["BTC"][-1]["close"] == pytest.approx(112.0)
+
+    def test_price_history_fetches_and_caches_post_cutoff_live_data(
+        self,
+        client,
+        tmp_db,
+        tmp_path,
+        monkeypatch,
+    ):
+        price_dir = tmp_path / "prices"
+        price_dir.mkdir()
+        config_path = tmp_path / "global.yaml"
+        cutoff_date = "2024-01-03T00:00:00+00:00"
+        cutoff_ms = int(datetime(2024, 1, 3, tzinfo=timezone.utc).timestamp() * 1000)
+        _write_price_config(config_path, cutoff_date)
+        _write_price_csv(
+            price_dir,
+            "BTCUSD_MAX_1DAY_FROM_PERPLEXITY.csv",
+            [
+                ("2024-01-01T00:00:00+00:00", 100.0, 110.0, 95.0, 105.0, 1000.0),
+                ("2024-01-02T00:00:00+00:00", 105.0, 115.0, 101.0, 112.0, 1200.0),
+                ("2024-01-03T00:00:00+00:00", 112.0, 118.0, 109.0, 115.0, 1300.0),
+            ],
+        )
+        monkeypatch.setenv("PRICE_DATA_DIR", str(price_dir))
+        monkeypatch.setenv("PRICE_HISTORY_CONFIG_PATH", str(config_path))
+        monkeypatch.delenv("PRICE_HISTORY_DISABLE_LIVE_SYNC", raising=False)
+
+        class MockHyperliquidClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
+
+            async def get_candles(self, symbol: str, interval: str, start_time: int, end_time: int):
+                assert symbol == "BTC"
+                assert interval == "1d"
+                assert start_time == cutoff_ms
+                return [
+                    {
+                        "t": cutoff_ms,
+                        "o": "112",
+                        "h": "118",
+                        "l": "109",
+                        "c": "116",
+                        "v": "1500",
+                    }
+                ]
+
+        monkeypatch.setattr("data.price_history.HyperliquidClient", MockHyperliquidClient)
+
+        resp = client.get("/branches/price-history?assets=BTC")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert [candle["date"] for candle in payload["assets"]["BTC"]] == [
+            "2024-01-01",
+            "2024-01-02",
+            "2024-01-03",
+        ]
+        assert payload["assets"]["BTC"][-1]["close"] == pytest.approx(116.0)
+
+        conn = sqlite3.connect(str(tmp_db))
+        rows = conn.execute(
+            "SELECT source, close FROM ohlcv WHERE asset = 'BTC' AND timeframe = '1d' ORDER BY ts ASC, source ASC"
+        ).fetchall()
+        conn.close()
+        assert rows == [
+            ("csv", 105.0),
+            ("csv", 112.0),
+            ("hyperliquid", 116.0),
+        ]
+
+    def test_price_history_supports_post_cutoff_4h_live_hydration(self, client, tmp_path, monkeypatch):
+        price_dir = tmp_path / "prices"
+        price_dir.mkdir()
+        config_path = tmp_path / "global.yaml"
+        cutoff_date = "2024-02-01T00:00:00+00:00"
+        _write_price_config(config_path, cutoff_date)
+        monkeypatch.setenv("PRICE_DATA_DIR", str(price_dir))
+        monkeypatch.setenv("PRICE_HISTORY_CONFIG_PATH", str(config_path))
+        monkeypatch.delenv("PRICE_HISTORY_DISABLE_LIVE_SYNC", raising=False)
+
+        class MockHyperliquidClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
+
+            async def get_candles(self, symbol: str, interval: str, start_time: int, end_time: int):
+                assert symbol == "SOL"
+                assert interval == "4h"
+                return [
+                    {
+                        "t": int(datetime(2024, 2, 1, 4, tzinfo=timezone.utc).timestamp() * 1000),
+                        "o": "98",
+                        "h": "102",
+                        "l": "94",
+                        "c": "100",
+                        "v": "800",
+                    }
+                ]
+
+        monkeypatch.setattr("data.price_history.HyperliquidClient", MockHyperliquidClient)
+
+        resp = client.get("/branches/price-history?assets=SOL&timeframe=4h")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["timeframe"] == "4h"
+        assert [candle["date"] for candle in payload["assets"]["SOL"]] == [
+            "2024-02-01T04:00:00+00:00"
+        ]
+        assert payload["assets"]["SOL"][-1]["close"] == pytest.approx(100.0)
+
+    def test_price_history_refreshes_existing_live_candle_for_current_day(
+        self,
+        client,
+        tmp_db,
+        tmp_path,
+        monkeypatch,
+    ):
+        price_dir = tmp_path / "prices"
+        price_dir.mkdir()
+        config_path = tmp_path / "global.yaml"
+        monkeypatch.setenv("PRICE_DATA_DIR", str(price_dir))
+        monkeypatch.setenv("PRICE_HISTORY_CONFIG_PATH", str(config_path))
+        monkeypatch.delenv("PRICE_HISTORY_DISABLE_LIVE_SYNC", raising=False)
+
+        day_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        day_start_ms = int(day_start.timestamp() * 1000)
+        _write_price_config(config_path, day_start.isoformat())
+        from db.schema import apply_schema
+        conn = sqlite3.connect(str(tmp_db))
+        apply_schema(conn)
+        conn.execute(
+            """
+            INSERT INTO ohlcv (ts, asset, source, timeframe, open, high, low, close, volume)
+            VALUES (?, 'BTC', 'hyperliquid', '1d', 100, 110, 90, 101, 500)
+            """,
+            (day_start_ms,),
+        )
+        conn.commit()
+        conn.close()
+
+        class MockHyperliquidClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return None
+
+            async def get_candles(self, symbol: str, interval: str, start_time: int, end_time: int):
+                assert symbol == "BTC"
+                assert interval == "1d"
+                assert start_time == day_start_ms
+                return [
+                    {
+                        "t": day_start_ms,
+                        "o": "100",
+                        "h": "112",
+                        "l": "90",
+                        "c": "109",
+                        "v": "900",
+                    }
+                ]
+
+        monkeypatch.setattr("data.price_history.HyperliquidClient", MockHyperliquidClient)
+
+        resp = client.get("/branches/price-history?assets=BTC")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["assets"]["BTC"][-1]["date"] == day_start.date().isoformat()
+        assert payload["assets"]["BTC"][-1]["close"] == pytest.approx(109.0)
+
+
+class TestSavedBranchYaml:
+    def test_list_branches_syncs_saved_yaml_files(self, client):
+        branches_dir = Path(os.environ["BRANCHES_YAML_DIR"])
+        _write_branch_yaml(
+            branches_dir / "april.yaml",
+            """
+            version: 1
+            branch:
+              id: yaml-branch
+              name: YAML Branch
+              color: "#50d2c1"
+              is_main: false
+              fork_date: "2025-01-01"
+              balance: 2500000
+              positions:
+                - id: pos-1
+                  asset: ETH
+                  direction: Long
+                  mode: Cross
+                  leverage: 5
+                  margin: 40000
+                  entry_date: "2025-04-16"
+                  entry_price: 1577.27
+                  exit_date: "2025-06-18"
+                  exit_price: 2525.54
+            """,
+        )
+
+        resp = client.get("/branches")
+        assert resp.status_code == 200
+        branch = next(item for item in resp.json() if item["id"] == "yaml-branch")
+        assert branch["source_type"] == "yaml"
+        assert branch["positions"][0]["exit_price"] == pytest.approx(2525.54)
+        assert branch["positions"][0]["margin"] == pytest.approx(40000)
+        assert branch["positions"][0]["leverage"] == pytest.approx(5)
+
+    def test_import_endpoint_persists_yaml_file(self, client):
+        branches_dir = Path(os.environ["BRANCHES_YAML_DIR"])
+        resp = client.post(
+            "/branches/import",
+            json={
+                "file_name": "custom-portfolio.yaml",
+                "raw_text": """
+                portfolio:
+                  name: Imported Portfolio
+                  balance: 2500000
+                  positions:
+                    - asset: BTC
+                      direction: Long
+                      mode: Cross
+                      leverage: 15
+                      margin: 33333.3333
+                      entry_date: "2025-04-15"
+                      entry_price: 83629.78
+                      exit_date: "2025-07-30"
+                      exit_price: 117830.15
+                """,
+            },
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["name"] == "Imported Portfolio"
+        assert payload["positions"][0]["margin"] == pytest.approx(33333.3333)
+        assert payload["positions"][0]["leverage"] == pytest.approx(15)
+        saved_file = branches_dir / "custom-portfolio.yaml"
+        assert saved_file.exists()
+
+    def test_updating_yaml_backed_branch_rewrites_file(self, client):
+        branches_dir = Path(os.environ["BRANCHES_YAML_DIR"])
+        yaml_path = branches_dir / "yaml-branch.yaml"
+        _write_branch_yaml(
+            yaml_path,
+            """
+            version: 1
+            branch:
+              id: yaml-branch
+              name: YAML Branch
+              color: "#50d2c1"
+              is_main: false
+              fork_date: "2025-01-01"
+              balance: 2500000
+              positions:
+                - id: pos-1
+                  asset: ETH
+                  direction: Long
+                  mode: Cross
+                  leverage: 5
+                  margin: 40000
+                  entry_date: "2025-04-16"
+                  entry_price: 1577.27
+                  exit_date: "2025-06-18"
+                  exit_price: 2525.54
+            """,
+        )
+
+        assert client.get("/branches").status_code == 200
+        resp = client.put("/branches/yaml-branch", json={"balance": 2600000})
+        assert resp.status_code == 200
+
+        import yaml
+
+        with yaml_path.open() as handle:
+            saved = yaml.safe_load(handle)
+        assert saved["branch"]["balance"] == pytest.approx(2600000)
+        assert "notional" not in saved["branch"]["positions"][0]

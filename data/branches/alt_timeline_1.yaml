@@ -1,0 +1,49 @@
+version: 1
+branch:
+  id: alt_timeline_1
+  name: alt_timeline_1
+  color: "#50d2c1"
+  is_main: false
+  fork_date: "2025-01-01"
+  balance: 2500000
+  positions:
+    - id: eth-apr16-jun18
+      asset: ETH
+      direction: Long
+      mode: Cross
+      leverage: 5
+      margin: 40000
+      entry_date: "2025-04-16"
+      entry_price: 1577.27
+      exit_date: "2025-06-18"
+      exit_price: 2525.54
+    - id: eth-apr17-jul16
+      asset: ETH
+      direction: Long
+      mode: Cross
+      leverage: 5
+      margin: 40000
+      entry_date: "2025-04-17"
+      entry_price: 1583.83
+      exit_date: "2025-07-16"
+      exit_price: 3373.12
+    - id: hype-apr15-aug06
+      asset: HYPE
+      direction: Long
+      mode: Cross
+      leverage: 10
+      margin: 20000
+      entry_date: "2025-04-15"
+      entry_price: 15.061
+      exit_date: "2025-08-06"
+      exit_price: 38.081
+    - id: btc-apr15-jul30
+      asset: BTC
+      direction: Long
+      mode: Cross
+      leverage: 15
+      margin: 33333.3333
+      entry_date: "2025-04-15"
+      entry_price: 83629.78
+      exit_date: "2025-07-30"
+      exit_price: 117830.15

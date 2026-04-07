@@ -3,14 +3,13 @@ export interface Signal {
   timestamp: string;
   asset: string;
   direction: "Long" | "Short";
-  strength: number;
-  type: string;
-  meta: {
-    bid_volume: number;
-    ask_volume: number;
-    ratio: number;
-    timeframe: string;
-  };
+  conviction: "HIGH" | "MEDIUM" | "LOW";
+  regime: string;
+  signalCount: number;
+  signals: string[];
+  price: number | null;
+  vwap: number | null;
+  timeframe: string;
 }
 
 export interface Position {
@@ -34,6 +33,9 @@ export interface Branch {
   parentId?: string;
   forkDate: string;
   balance: number;
+  sourceType?: string;
+  sourcePath?: string;
+  updatedAt?: string;
   positions: Position[];
 }
 

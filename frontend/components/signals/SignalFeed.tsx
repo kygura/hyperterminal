@@ -10,11 +10,11 @@ const SIGNAL_COLUMNS = [
   "Time",
   "Asset",
   "Dir",
-  "Strength",
-  "Type",
-  "Bid Vol",
-  "Ask Vol",
-  "Ratio",
+  "Conviction",
+  "Regime",
+  "Signals",
+  "Price",
+  "VWAP",
 ] as const;
 
 interface SignalFeedProps {
@@ -103,7 +103,7 @@ export function SignalFeed({
 
   return (
     <div className="panel overflow-hidden">
-      <div className="grid grid-cols-[0.95fr_0.8fr_0.7fr_0.85fr_1.7fr_1fr_1fr_0.75fr] gap-3 border-b border-[--border] bg-[--bg-panel-alt] px-4 py-3">
+      <div className="grid grid-cols-[0.95fr_0.8fr_0.7fr_0.9fr_1.25fr_1.8fr_0.9fr_0.9fr] gap-3 border-b border-[--border] bg-[--bg-panel-alt] px-4 py-3">
         {SIGNAL_COLUMNS.map((column) => (
           <span key={column} className="ui-label">
             {column}

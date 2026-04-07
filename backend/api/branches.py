@@ -14,6 +14,13 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from data.branch_yaml import (
+    branch_source_path,
+    import_saved_branch_text,
+    persist_branch_to_yaml,
+    sync_saved_branches,
+)
+from data.price_history import get_price_dataset
 from db.schema import apply_schema
 
 router = APIRouter(prefix="/branches", tags=["branches"])
@@ -114,6 +121,12 @@ def _ensure_branches_tables() -> None:
         conn.execute("ALTER TABLE portfolio_branches ADD COLUMN source_wallet_id TEXT")
     if "balance" not in branch_columns:
         conn.execute("ALTER TABLE portfolio_branches ADD COLUMN balance REAL DEFAULT 10000")
+    if "source_type" not in branch_columns:
+        conn.execute("ALTER TABLE portfolio_branches ADD COLUMN source_type TEXT")
+    if "source_path" not in branch_columns:
+        conn.execute("ALTER TABLE portfolio_branches ADD COLUMN source_path TEXT")
+    if "source_mtime" not in branch_columns:
+        conn.execute("ALTER TABLE portfolio_branches ADD COLUMN source_mtime REAL")
 
     trade_columns = _column_names(conn, "branch_trades")
     if "leverage" not in trade_columns:
@@ -122,6 +135,10 @@ def _ensure_branches_tables() -> None:
         conn.execute("ALTER TABLE branch_trades ADD COLUMN margin REAL")
     if "mode" not in trade_columns:
         conn.execute("ALTER TABLE branch_trades ADD COLUMN mode TEXT DEFAULT 'Cross'")
+
+    position_columns = _column_names(conn, "branch_positions")
+    if "exit_price" not in position_columns:
+        conn.execute("ALTER TABLE branch_positions ADD COLUMN exit_price REAL")
 
     conn.execute(
         """
@@ -212,12 +229,31 @@ class PositionCreate(BaseModel):
     entry_date: str
     entry_price: float
     exit_date: Optional[str] = None
+    exit_price: Optional[float] = None
 
 
 class PositionUpdate(BaseModel):
+    asset: Optional[str] = None
+    direction: Optional[str] = None
+    mode: Optional[str] = None
     leverage: Optional[float] = None
     margin: Optional[float] = None
+    entry_date: Optional[str] = None
+    entry_price: Optional[float] = None
     exit_date: Optional[str] = None
+    exit_price: Optional[float] = None
+
+
+class BranchImportBody(BaseModel):
+    raw_text: str
+    file_name: Optional[str] = None
+
+
+def _sync_saved_branch_files(conn: sqlite3.Connection) -> None:
+    try:
+        sync_saved_branches(conn)
+    except Exception as exc:
+        logger.warning("Could not sync saved branch YAML files: %s", exc)
 
 
 def _get_branch_or_404(conn: sqlite3.Connection, branch_id: str) -> sqlite3.Row:
@@ -454,6 +490,7 @@ def _create_branch(conn: sqlite3.Connection, data: BranchCreate) -> dict:
 @router.get("")
 def list_branches():
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     branches = [
         _serialize_branch(conn, row)
         for row in conn.execute(
@@ -464,9 +501,40 @@ def list_branches():
     return branches
 
 
+@router.get("/price-history")
+async def get_branch_price_history(
+    assets: Optional[str] = Query(default=None, description="Comma-separated asset list"),
+    timeframe: str = Query(default="1d", description="Requested candle timeframe: 1h, 4h, or 1d"),
+):
+    requested_assets = (
+        [asset.strip().upper() for asset in assets.split(",") if asset.strip()]
+        if assets
+        else None
+    )
+    try:
+        return await get_price_dataset(requested_assets, timeframe=timeframe)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/import")
+def import_branch_file(body: BranchImportBody):
+    conn = _branches_conn()
+    _sync_saved_branch_files(conn)
+    try:
+        branch, _ = import_saved_branch_text(conn, body.raw_text, file_name=body.file_name)
+        result = _serialize_branch(conn, _get_branch_or_404(conn, branch["id"]))
+    except ValueError as exc:
+        conn.close()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    conn.close()
+    return result
+
+
 @router.get("/{branch_id}")
 def get_branch(branch_id: str):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     branch = _serialize_branch(conn, _get_branch_or_404(conn, branch_id))
     conn.close()
     return branch
@@ -475,6 +543,7 @@ def get_branch(branch_id: str):
 @router.post("")
 def create_branch(data: BranchCreate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     branch = _create_branch(conn, data)
     conn.close()
     return branch
@@ -483,6 +552,7 @@ def create_branch(data: BranchCreate):
 @router.post("/fork")
 def fork_branch(data: BranchCreate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     branch = _create_branch(conn, data)
     conn.close()
     return branch
@@ -491,6 +561,7 @@ def fork_branch(data: BranchCreate):
 @router.put("/{branch_id}")
 def update_branch(branch_id: str, data: BranchUpdate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
 
     updates = {}
@@ -513,6 +584,7 @@ def update_branch(branch_id: str, data: BranchUpdate):
             tuple(updates.values()) + (branch_id,),
         )
         conn.commit()
+        persist_branch_to_yaml(conn, branch_id)
 
     branch = _serialize_branch(conn, _get_branch_or_404(conn, branch_id))
     conn.close()
@@ -522,10 +594,12 @@ def update_branch(branch_id: str, data: BranchUpdate):
 @router.put("/{branch_id}/adopt")
 def adopt_branch(branch_id: str):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
     conn.execute("UPDATE portfolio_branches SET is_main = 0")
     conn.execute("UPDATE portfolio_branches SET is_main = 1 WHERE id = ?", (branch_id,))
     conn.commit()
+    persist_branch_to_yaml(conn, branch_id)
     conn.close()
     return {"ok": True, "main": branch_id}
 
@@ -533,21 +607,26 @@ def adopt_branch(branch_id: str):
 @router.delete("/{branch_id}")
 def delete_branch(branch_id: str):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     branch = _get_branch_or_404(conn, branch_id)
     if branch["is_main"]:
         raise HTTPException(status_code=400, detail="Cannot delete the main branch")
+    source_path = branch_source_path(conn, branch_id)
 
     conn.execute("DELETE FROM branch_positions WHERE branch_id = ?", (branch_id,))
     conn.execute("DELETE FROM branch_trades WHERE branch_id = ?", (branch_id,))
     conn.execute("DELETE FROM portfolio_branches WHERE id = ?", (branch_id,))
     conn.commit()
     conn.close()
+    if source_path and source_path.exists():
+        source_path.unlink()
     return {"ok": True}
 
 
 @router.post("/{branch_id}/trades")
 def add_trade(branch_id: str, trade: TradeCreate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
 
     trade_id = uuid.uuid4().hex[:12]
@@ -584,6 +663,7 @@ def add_trade(branch_id: str, trade: TradeCreate):
         ),
     )
     conn.commit()
+    persist_branch_to_yaml(conn, branch_id)
     row = dict(conn.execute("SELECT * FROM branch_trades WHERE id = ?", (trade_id,)).fetchone())
     conn.close()
     return row
@@ -592,6 +672,7 @@ def add_trade(branch_id: str, trade: TradeCreate):
 @router.put("/{branch_id}/trades/{trade_id}")
 def update_trade(branch_id: str, trade_id: str, data: TradeUpdate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
     existing = conn.execute(
         "SELECT * FROM branch_trades WHERE id = ? AND branch_id = ?",
@@ -641,6 +722,7 @@ def update_trade(branch_id: str, trade_id: str, data: TradeUpdate):
             tuple(updates.values()) + (trade_id, branch_id),
         )
         conn.commit()
+        persist_branch_to_yaml(conn, branch_id)
 
     row = dict(
         conn.execute(
@@ -655,9 +737,11 @@ def update_trade(branch_id: str, trade_id: str, data: TradeUpdate):
 @router.delete("/{branch_id}/trades/{trade_id}")
 def delete_trade(branch_id: str, trade_id: str):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
     conn.execute("DELETE FROM branch_trades WHERE id = ? AND branch_id = ?", (trade_id, branch_id))
     conn.commit()
+    persist_branch_to_yaml(conn, branch_id)
     conn.close()
     return {"ok": True}
 
@@ -669,6 +753,7 @@ def get_branch_equity(
     to_date: Optional[str] = Query(default=None, alias="to"),
 ):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     branch = dict(_get_branch_or_404(conn, branch_id))
     trades = _fetch_trades(conn, branch_id)
 
@@ -722,6 +807,7 @@ def get_branch_equity(
 @router.post("/{branch_id}/positions")
 def add_position(branch_id: str, pos: PositionCreate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
 
     pos_id = uuid.uuid4().hex[:12]
@@ -729,8 +815,8 @@ def add_position(branch_id: str, pos: PositionCreate):
     conn.execute(
         """
         INSERT INTO branch_positions
-            (id, branch_id, asset, direction, mode, leverage, margin, entry_date, entry_price, exit_date, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, branch_id, asset, direction, mode, leverage, margin, entry_date, entry_price, exit_date, exit_price, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             pos_id,
@@ -743,10 +829,12 @@ def add_position(branch_id: str, pos: PositionCreate):
             pos.entry_date,
             pos.entry_price,
             pos.exit_date,
+            pos.exit_price,
             now,
         ),
     )
     conn.commit()
+    persist_branch_to_yaml(conn, branch_id)
     row = dict(conn.execute("SELECT * FROM branch_positions WHERE id = ?", (pos_id,)).fetchone())
     conn.close()
     return row
@@ -755,6 +843,7 @@ def add_position(branch_id: str, pos: PositionCreate):
 @router.put("/{branch_id}/positions/{pos_id}")
 def update_position(branch_id: str, pos_id: str, data: PositionUpdate):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
     pos = conn.execute(
         "SELECT * FROM branch_positions WHERE id = ? AND branch_id = ?",
@@ -764,12 +853,24 @@ def update_position(branch_id: str, pos_id: str, data: PositionUpdate):
         raise HTTPException(status_code=404, detail="Position not found")
 
     updates = {}
+    if data.asset is not None:
+        updates["asset"] = data.asset.upper()
+    if data.direction is not None:
+        updates["direction"] = data.direction
+    if data.mode is not None:
+        updates["mode"] = data.mode
     if data.leverage is not None:
         updates["leverage"] = data.leverage
     if data.margin is not None:
         updates["margin"] = data.margin
+    if data.entry_date is not None:
+        updates["entry_date"] = data.entry_date
+    if data.entry_price is not None:
+        updates["entry_price"] = data.entry_price
     if data.exit_date is not None:
         updates["exit_date"] = data.exit_date
+    if data.exit_price is not None:
+        updates["exit_price"] = data.exit_price
 
     if updates:
         set_clause = ", ".join(f"{column} = ?" for column in updates)
@@ -778,6 +879,7 @@ def update_position(branch_id: str, pos_id: str, data: PositionUpdate):
             tuple(updates.values()) + (pos_id, branch_id),
         )
         conn.commit()
+        persist_branch_to_yaml(conn, branch_id)
 
     row = dict(
         conn.execute(
@@ -792,8 +894,10 @@ def update_position(branch_id: str, pos_id: str, data: PositionUpdate):
 @router.delete("/{branch_id}/positions/{pos_id}")
 def delete_position(branch_id: str, pos_id: str):
     conn = _branches_conn()
+    _sync_saved_branch_files(conn)
     _get_branch_or_404(conn, branch_id)
     conn.execute("DELETE FROM branch_positions WHERE id = ? AND branch_id = ?", (pos_id, branch_id))
     conn.commit()
+    persist_branch_to_yaml(conn, branch_id)
     conn.close()
     return {"ok": True}

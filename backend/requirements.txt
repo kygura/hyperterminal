@@ -16,3 +16,4 @@ httpx
 pyyaml>=6.0
 python-telegram-bot>=20.0
 aiosqlite>=0.20.0
+pytest

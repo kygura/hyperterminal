@@ -102,6 +102,9 @@ CREATE TABLE IF NOT EXISTS portfolio_branches (
     initial_capital REAL DEFAULT 10000,
     balance         REAL DEFAULT 10000,
     source_wallet_id TEXT,
+    source_type     TEXT,
+    source_path     TEXT,
+    source_mtime    REAL,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
@@ -118,6 +121,7 @@ CREATE TABLE IF NOT EXISTS branch_positions (
     entry_date  TEXT NOT NULL,
     entry_price REAL NOT NULL,
     exit_date   TEXT,
+    exit_price  REAL,
     created_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_branch_positions_branch_entry ON branch_positions(branch_id, entry_date ASC);

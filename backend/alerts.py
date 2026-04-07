@@ -45,13 +45,33 @@ _LINE = "───────────────────────�
 class AlertManager:
     """Tracks cooldowns and formats alerts per v2 spec."""
 
-    def __init__(self, cooldown_seconds: int = 300) -> None:
+    def __init__(self, cooldown_seconds: int = 300, cadence: str = "hourly") -> None:
         self.cooldown_seconds = cooldown_seconds
+        self.cadence = cadence
         self._last_fire: dict[tuple[str, str], float] = {}
+        self._last_bucket: dict[tuple[str, str], str] = {}
         self._total_alerts = 0
+
+    def _bucket_for(self, timestamp: float) -> str:
+        tm = time.gmtime(timestamp)
+        if self.cadence == "weekly":
+            iso_year, iso_week, _ = time.strftime("%G %V %u", tm).split()
+            return f"{iso_year}-W{iso_week}"
+        if self.cadence == "daily":
+            return time.strftime("%Y-%m-%d", tm)
+        return time.strftime("%Y-%m-%dT%H", tm)
 
     def should_fire(self, candidate: TradeCandidate) -> bool:
         key = (candidate.coin, candidate.direction)
+        bucket = self._bucket_for(candidate.timestamp)
+        if self._last_bucket.get(key) == bucket:
+            logger.debug(
+                "AlertManager: suppressing %s %s — already emitted for %s bucket",
+                candidate.coin,
+                candidate.direction,
+                bucket,
+            )
+            return False
         last = self._last_fire.get(key, 0.0)
         remaining = self.cooldown_seconds - (time.time() - last)
         if remaining > 0:
@@ -65,6 +85,7 @@ class AlertManager:
     def record_fire(self, candidate: TradeCandidate) -> None:
         key = (candidate.coin, candidate.direction)
         self._last_fire[key] = time.time()
+        self._last_bucket[key] = self._bucket_for(candidate.timestamp)
         self._total_alerts += 1
 
     @property

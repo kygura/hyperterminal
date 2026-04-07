@@ -5,13 +5,16 @@ assets:
 database:
   path: data.db
 
+strategy:
+  timeframe: hourly
+
 polling:
   # Hyperliquid REST
-  funding_poll_seconds: 60
-  context_poll_seconds: 10
+  funding_poll_seconds: 3600
+  context_poll_seconds: 300
   trade_ws_enabled: true
 
-  # Bybit REST (supplemental data — OHLCV, OI, spot volume)
+  # Supplemental REST data
   bybit_ohlcv_seconds: 3600      # hourly candles
   bybit_oi_seconds: 3600         # hourly OI
   bybit_volume_seconds: 3600     # hourly spot volume
@@ -21,10 +24,11 @@ telegram:
   chat_id: "${TELEGRAM_CHAT_ID}"
 
 alerts:
-  cooldown_seconds: 300          # 5 min per (coin, direction) pair
+  cooldown_seconds: 3600
+  telegram_min_interval_seconds: 10
 
 engine:
-  tick_interval_seconds: 30      # evaluate signals every 30s
+  tick_interval_seconds: 3600
 
 confluence:
   thresholds:
@@ -34,3 +38,10 @@ confluence:
 
 health_check:
   interval_seconds: 21600        # 6 hours
+
+price_history:
+  cutoff_date: "2026-04-01T00:00:00+00:00"
+  hydration_timeframes:
+    - 1h
+    - 4h
+    - 1d

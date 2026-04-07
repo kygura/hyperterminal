@@ -13,23 +13,60 @@ export interface Candle {
 export interface OhlcDataset {
   generatedAt: string;
   days: number;
+  timeframe?: string;
+  cutoffDate?: string | null;
   assets: Record<string, Candle[]>;
 }
 
 export type PriceField = "open" | "high" | "low" | "close";
 export type DateLike = string | Date;
 
-const dataset = rawData as OhlcDataset;
+const fallbackDataset = rawData as OhlcDataset;
 
-export const OHLC_DATA = dataset;
-export const OHLC_ASSETS = Object.keys(ASSETS).filter(
-  (asset) => asset in OHLC_DATA.assets,
-);
-export const DEFAULT_ASSET = OHLC_ASSETS[0] ?? "BTC";
-export const OHLC_DATES =
-  OHLC_DATA.assets[DEFAULT_ASSET]?.map((candle) => candle.date) ?? [];
+let dateToExactIndex = new Map<string, number>();
 
-const dateToExactIndex = new Map(OHLC_DATES.map((date, index) => [date, index]));
+export let OHLC_DATA: OhlcDataset = fallbackDataset;
+export let OHLC_ASSETS: string[] = [];
+export let DEFAULT_ASSET = "BTC";
+export let OHLC_DATES: string[] = [];
+
+const refreshExports = (): void => {
+  OHLC_ASSETS = Object.keys(ASSETS).filter((asset) => asset in OHLC_DATA.assets);
+  DEFAULT_ASSET = OHLC_ASSETS[0] ?? "BTC";
+  OHLC_DATES = OHLC_DATA.assets[DEFAULT_ASSET]?.map((candle) => candle.date) ?? [];
+  dateToExactIndex = new Map(OHLC_DATES.map((date, index) => [date, index]));
+};
+
+refreshExports();
+
+const mergeCandles = (current: Candle[] = [], incoming: Candle[] = []): Candle[] => {
+  const byDate = new Map(current.map((candle) => [candle.date, candle]));
+
+  for (const candle of incoming) {
+    byDate.set(candle.date, candle);
+  }
+
+  return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+};
+
+export const setOhlcDataset = (dataset: OhlcDataset): void => {
+  const nextAssets = Object.fromEntries(
+    Object.entries(dataset.assets ?? {}).filter(([, candles]) => Array.isArray(candles) && candles.length > 0),
+  );
+  const mergedAssets = { ...OHLC_DATA.assets };
+
+  for (const [asset, candles] of Object.entries(nextAssets)) {
+    mergedAssets[asset] = mergeCandles(mergedAssets[asset], candles);
+  }
+
+  OHLC_DATA = {
+    generatedAt: dataset.generatedAt || OHLC_DATA.generatedAt,
+    days: Math.max(dataset.days || 0, OHLC_DATA.days),
+    assets: mergedAssets,
+  };
+
+  refreshExports();
+};
 
 const normalizeDate = (value: DateLike): string =>
   typeof value === "string" ? value.slice(0, 10) : value.toISOString().slice(0, 10);

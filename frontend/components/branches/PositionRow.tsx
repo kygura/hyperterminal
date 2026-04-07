@@ -7,7 +7,6 @@ import { OHLC_ASSETS, OHLC_DATES, closeAt } from "@/lib/price-data";
 import { ASSETS, Position } from "@/lib/types";
 
 const FALLBACK_MAX_LEVERAGE = 20;
-const EVALUATION_FALLBACK_DATE = OHLC_DATES[OHLC_DATES.length - 1] ?? "";
 
 const joinClasses = (...values: Array<string | false | null | undefined>): string =>
   values.filter(Boolean).join(" ");
@@ -77,6 +76,9 @@ const draftFromPosition = (position: Position): PositionEditorDraft => ({
 const assetMaxLeverage = (asset: string): number =>
   ASSETS[asset]?.maxLeverage ?? FALLBACK_MAX_LEVERAGE;
 
+const evaluationFallbackDate = (): string =>
+  OHLC_DATES[OHLC_DATES.length - 1] ?? "";
+
 export default function PositionRow({
   assetOptions,
   className,
@@ -126,7 +128,7 @@ export default function PositionRow({
       return state;
     }
 
-    return posStateAt(position, evaluationDate ?? position.exitDate ?? EVALUATION_FALLBACK_DATE);
+    return posStateAt(position, evaluationDate ?? position.exitDate ?? evaluationFallbackDate());
   }, [evaluationDate, position, state]);
 
   const statusBadges = [
@@ -240,7 +242,7 @@ export default function PositionRow({
             <p className="mono-data mt-2 text-[--text-primary]">${fmt(position.margin)}</p>
           </div>
           <div>
-            <p className="ui-label">Size</p>
+            <p className="ui-label">Notional</p>
             <p className="mono-data mt-2 text-[--text-primary]">${fmt(computedState.notional)}</p>
           </div>
           <div>

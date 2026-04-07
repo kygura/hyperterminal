@@ -20,6 +20,7 @@ export interface SignalStreamState {
 
 export const SIGNAL_STREAM_MAX_ROWS = 200;
 export const DEFAULT_SIGNAL_STREAM_URL = "ws://localhost:8000/ws/signals";
+export const DEFAULT_API_URL = "http://localhost:8000";
 export const SIGNAL_STREAM_STATUS_EVENT = "hypertrade:signal-stream-status";
 
 export const SIGNAL_STATUS_META: Record<
@@ -52,38 +53,120 @@ export function resolveSignalStreamUrl(url?: string): string {
   return url ?? process.env.NEXT_PUBLIC_SIGNAL_WS_URL ?? DEFAULT_SIGNAL_STREAM_URL;
 }
 
+export function resolveApiUrl(url?: string): string {
+  return (url ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL).replace(/\/$/, "");
+}
+
 export function getSignalKey(signal: Signal): string {
   return [
     signal.id,
     signal.timestamp,
     signal.asset,
     signal.direction,
-    signal.type,
-    signal.meta.bid_volume,
-    signal.meta.ask_volume,
-    signal.meta.ratio,
-    signal.meta.timeframe,
+    signal.conviction,
+    signal.regime,
+    signal.signalCount,
+    signal.timeframe,
   ].join(":");
 }
 
-function isSignal(value: unknown): value is Signal {
+function normalizeDirection(value: unknown): Signal["direction"] | null {
+  const direction = String(value ?? "").toUpperCase();
+  if (direction.includes("LONG")) {
+    return "Long";
+  }
+  if (direction.includes("SHORT")) {
+    return "Short";
+  }
+  return null;
+}
+
+function normalizeTimestamp(value: unknown): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString();
+    }
+  }
+  return null;
+}
+
+function normalizeSignals(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        return parsed.filter((entry): entry is string => typeof entry === "string");
+      }
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeSignalRecord(value: unknown): Signal | null {
   if (!value || typeof value !== "object") {
-    return false;
+    return null;
   }
 
-  const candidate = value as Partial<Signal>;
+  const candidate = value as Record<string, unknown>;
+  const direction = normalizeDirection(candidate.direction);
+  const timestamp = normalizeTimestamp(candidate.ts ?? candidate.timestamp);
 
+  if (!direction || !timestamp || typeof candidate.asset !== "string") {
+    return null;
+  }
+
+  const signals = normalizeSignals(candidate.signals_json ?? candidate.signals);
+  const legacyMeta =
+    candidate.meta && typeof candidate.meta === "object"
+      ? (candidate.meta as Record<string, unknown>)
+      : null;
+  const signalCount =
+    typeof candidate.signal_count === "number" && Number.isFinite(candidate.signal_count)
+      ? candidate.signal_count
+      : signals.length;
+
+  const conviction = String(candidate.conviction ?? "LOW").toUpperCase();
   return (
-    typeof candidate.id === "string" &&
-    typeof candidate.timestamp === "string" &&
-    typeof candidate.asset === "string" &&
-    (candidate.direction === "Long" || candidate.direction === "Short") &&
-    typeof candidate.strength === "number" &&
-    typeof candidate.type === "string" &&
-    typeof candidate.meta?.bid_volume === "number" &&
-    typeof candidate.meta?.ask_volume === "number" &&
-    typeof candidate.meta?.ratio === "number" &&
-    typeof candidate.meta?.timeframe === "string"
+    {
+      id:
+        typeof candidate.id === "string"
+          ? candidate.id
+          : [candidate.asset, timestamp, direction, candidate.regime ?? conviction].join(":"),
+      timestamp,
+      asset: candidate.asset,
+      direction,
+      conviction:
+        conviction === "HIGH" || conviction === "MEDIUM" ? conviction : "LOW",
+      regime:
+        typeof candidate.regime === "string" && candidate.regime.length > 0
+          ? candidate.regime
+          : typeof candidate.type === "string"
+            ? candidate.type
+            : "Signal",
+      signalCount,
+      signals,
+      price: normalizeNumber(candidate.price),
+      vwap: normalizeNumber(candidate.vwap),
+      timeframe:
+        typeof candidate.timeframe === "string" && candidate.timeframe.length > 0
+          ? candidate.timeframe
+          : typeof legacyMeta?.timeframe === "string"
+            ? legacyMeta.timeframe
+            : "hourly",
+    }
   );
 }
 
@@ -94,7 +177,17 @@ export function parseSignalMessage(data: string | ArrayBuffer | Blob): Signal | 
 
   try {
     const parsed: unknown = JSON.parse(data);
-    return isSignal(parsed) ? parsed : null;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      "type" in parsed &&
+      (parsed as { type?: unknown }).type === "signal" &&
+      "data" in parsed
+    ) {
+      return normalizeSignalRecord((parsed as { data: unknown }).data);
+    }
+
+    return normalizeSignalRecord(parsed);
   } catch {
     return null;
   }
@@ -102,6 +195,7 @@ export function parseSignalMessage(data: string | ArrayBuffer | Blob): Signal | 
 
 export function useSignalStream(url?: string): SignalStreamState {
   const streamUrl = useMemo(() => resolveSignalStreamUrl(url), [url]);
+  const apiUrl = useMemo(() => resolveApiUrl(), []);
   const [signals, setSignals] = useState<Signal[]>([]);
   const [status, setStatus] = useState<SignalStreamStatus>("connecting");
   const [latestSignalKey, setLatestSignalKey] = useState<string | null>(null);
@@ -111,10 +205,39 @@ export function useSignalStream(url?: string): SignalStreamState {
       return undefined;
     }
 
+    const controller = new AbortController();
+
+    void fetch(`${apiUrl}/api/signals/history?limit=50`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`signal preload failed: ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((payload: unknown) => {
+        if (!Array.isArray(payload)) {
+          return;
+        }
+        const normalizedSignals = payload
+          .map((entry) => normalizeSignalRecord(entry))
+          .filter((entry): entry is Signal => entry !== null);
+        setSignals(normalizedSignals.slice(0, SIGNAL_STREAM_MAX_ROWS));
+      })
+      .catch(() => undefined);
+
+    return () => controller.abort();
+  }, [apiUrl]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
     let closedByCleanup = false;
     let hasConnected = false;
 
-    setSignals([]);
     setLatestSignalKey(null);
     setStatus("connecting");
 

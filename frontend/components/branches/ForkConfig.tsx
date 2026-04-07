@@ -6,10 +6,11 @@ import { accountStateAt, fmt } from "@/lib/margin-engine";
 import { OHLC_DATES } from "@/lib/price-data";
 import { Branch } from "@/lib/types";
 
-const DEFAULT_FORK_DATE = OHLC_DATES[OHLC_DATES.length - 1] ?? OHLC_DATES[0] ?? "";
-
 const joinClasses = (...values: Array<string | false | null | undefined>): string =>
   values.filter(Boolean).join(" ");
+
+const defaultForkDate = (): string =>
+  OHLC_DATES[OHLC_DATES.length - 1] ?? OHLC_DATES[0] ?? "";
 
 export interface ForkConfigSubmit {
   balance: number;
@@ -35,7 +36,7 @@ export default function ForkConfig({
   parentBranch,
 }: ForkConfigProps) {
   const [name, setName] = useState(defaultName ?? `${parentBranch.name} Fork`);
-  const [forkDate, setForkDate] = useState(defaultDate ?? DEFAULT_FORK_DATE);
+  const [forkDate, setForkDate] = useState(defaultDate ?? defaultForkDate());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export default function ForkConfig({
   }, [defaultName, parentBranch.name]);
 
   useEffect(() => {
-    setForkDate(defaultDate ?? DEFAULT_FORK_DATE);
+    setForkDate(defaultDate ?? defaultForkDate());
   }, [defaultDate]);
 
   const accountState = useMemo(
