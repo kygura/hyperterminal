@@ -1,0 +1,36 @@
+assets:
+  - BTC
+  - ETH
+
+database:
+  path: data.db
+
+polling:
+  # Hyperliquid REST
+  funding_poll_seconds: 60
+  context_poll_seconds: 10
+  trade_ws_enabled: true
+
+  # Bybit REST (supplemental data — OHLCV, OI, spot volume)
+  bybit_ohlcv_seconds: 3600      # hourly candles
+  bybit_oi_seconds: 3600         # hourly OI
+  bybit_volume_seconds: 3600     # hourly spot volume
+
+telegram:
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  chat_id: "${TELEGRAM_CHAT_ID}"
+
+alerts:
+  cooldown_seconds: 300          # 5 min per (coin, direction) pair
+
+engine:
+  tick_interval_seconds: 30      # evaluate signals every 30s
+
+confluence:
+  thresholds:
+    low: 1
+    medium: 2
+    high: 3
+
+health_check:
+  interval_seconds: 21600        # 6 hours

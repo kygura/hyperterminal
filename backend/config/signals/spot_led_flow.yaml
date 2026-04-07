@@ -1,0 +1,19 @@
+enabled: true
+
+# Spot volume surge threshold vs 24h rolling average
+spot_surge_threshold_pct: 20.0
+
+# OI must stay flat (within ±N%) during the spot surge
+oi_flat_band_pct: 3.0
+
+# Rolling lookback for the average (hours)
+lookback_hours: 24
+
+# Consecutive readings required before emitting signal (confirmation buffer)
+confirm_readings: 2
+
+# Priority thresholds (surge_score = vol_surge / threshold)
+thresholds:
+  low: 1.0      # 20% surge  → LOW
+  medium: 1.5   # 30% surge  → MEDIUM
+  high: 2.5     # 50% surge  → HIGH

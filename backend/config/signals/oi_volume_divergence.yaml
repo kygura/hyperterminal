@@ -1,0 +1,9 @@
+enabled: true
+lookback_minutes: 60
+oi_change_threshold_pct: 2.0
+volume_decline_threshold_pct: -15.0
+thresholds:
+  low: 1.0
+  medium: 1.5
+  high: 2.0
+min_snapshots: 6

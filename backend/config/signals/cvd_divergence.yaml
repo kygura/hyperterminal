@@ -1,0 +1,9 @@
+enabled: true
+lookback_minutes: 30
+price_change_threshold_pct: 0.5
+cvd_reversal_threshold_pct: -20.0
+thresholds:
+  low: 1.0
+  medium: 1.5
+  high: 2.0
+min_trades: 100

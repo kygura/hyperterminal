@@ -1,0 +1,329 @@
+2026-03-10 11:26:36,065 [INFO] main: hl-signal-daemon starting (dry_run=True, log_level=INFO)
+2026-03-10 11:26:36,073 [INFO] main: Config validation passed
+2026-03-10 11:26:36,075 [INFO] src.engine: Loaded signal: cvd_divergence (CVDDivergenceSignal)
+2026-03-10 11:26:36,076 [INFO] src.engine: Loaded signal: funding_extremes (FundingExtremesSignal)
+2026-03-10 11:26:36,078 [INFO] src.engine: Loaded signal: oi_volume_divergence (OIVolumeDivergenceSignal)
+2026-03-10 11:26:36,079 [INFO] src.engine: Loaded signal: premium_extremes (PremiumExtremesSignal)
+2026-03-10 11:26:36,079 [INFO] src.engine: SignalEngine: 4 signals loaded
+2026-03-10 11:26:36,080 [INFO] src.data.hl_client: HLClient HTTP session started
+2026-03-10 11:26:36,084 [INFO] main: Daemon online — assets=['BTC', 'ETH'] signals=['cvd_divergence', 'funding_extremes', 'oi_volume_divergence', 'premium_extremes']
+2026-03-10 11:26:36,086 [INFO] main: Starting asset context polling every 10s
+2026-03-10 11:26:36,090 [INFO] main: Starting funding history polling every 60s for ['BTC', 'ETH']
+2026-03-10 11:26:36,091 [INFO] src.data.hl_client: HLClient[trades]: connecting to WebSocket
+2026-03-10 11:26:36,125 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:26:36,126 [INFO] main: Starting engine tick loop every 30s
+2026-03-10 11:26:36,127 [INFO] main: DataStore counts: {'funding': {}, 'trades': {}, 'snapshots': {}, 'liquidations': 0}
+2026-03-10 11:26:36,711 [INFO] src.data.hl_client: HLClient[trades]: WebSocket connected
+2026-03-10 11:26:36,712 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:26:48,412 [INFO] main: Received signal 15 — initiating graceful shutdown
+2026-03-10 11:26:49,615 [INFO] src.data.hl_client: HLClient[trades]: WebSocket task stopped
+2026-03-10 11:27:37,141 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket task stopped
+2026-03-10 11:27:37,141 [INFO] main: Shutting down all tasks...
+2026-03-10 11:27:37,142 [INFO] src.data.hl_client: HLClient HTTP session closed
+2026-03-10 11:27:37,142 [INFO] main: hl-signal-daemon stopped
+2026-03-10 11:28:24,562 [INFO] main: hl-signal-daemon starting (dry_run=True, log_level=INFO)
+2026-03-10 11:28:24,565 [INFO] main: Config validation passed
+2026-03-10 11:28:24,566 [INFO] src.engine: Loaded signal: cvd_divergence (CVDDivergenceSignal)
+2026-03-10 11:28:24,567 [INFO] src.engine: Loaded signal: funding_extremes (FundingExtremesSignal)
+2026-03-10 11:28:24,568 [INFO] src.engine: Loaded signal: oi_volume_divergence (OIVolumeDivergenceSignal)
+2026-03-10 11:28:24,569 [INFO] src.engine: Loaded signal: premium_extremes (PremiumExtremesSignal)
+2026-03-10 11:28:24,569 [INFO] src.engine: SignalEngine: 4 signals loaded
+2026-03-10 11:28:24,569 [INFO] src.data.hl_client: HLClient HTTP session started
+2026-03-10 11:28:24,570 [INFO] main: Daemon online — assets=['BTC', 'ETH'] signals=['cvd_divergence', 'funding_extremes', 'oi_volume_divergence', 'premium_extremes']
+2026-03-10 11:28:24,570 [INFO] main: Starting asset context polling every 10s
+2026-03-10 11:28:24,573 [INFO] main: Starting funding history polling every 60s for ['BTC', 'ETH']
+2026-03-10 11:28:24,574 [INFO] src.data.hl_client: HLClient[trades]: connecting to WebSocket
+2026-03-10 11:28:24,604 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:28:24,605 [INFO] main: Starting engine tick loop every 30s
+2026-03-10 11:28:24,606 [INFO] main: DataStore counts: {'funding': {}, 'trades': {}, 'snapshots': {}, 'liquidations': 0}
+2026-03-10 11:28:25,169 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:28:25,177 [INFO] src.data.hl_client: HLClient[trades]: WebSocket connected
+2026-03-10 11:28:47,369 [INFO] main: Received signal 2 — initiating graceful shutdown
+2026-03-10 11:28:48,516 [INFO] src.data.hl_client: HLClient[trades]: WebSocket task stopped
+2026-03-10 11:28:48,735 [INFO] main: Received signal 2 — initiating graceful shutdown
+2026-03-10 11:33:13,261 [INFO] main: hl-signal-daemon starting (dry_run=False, log_level=INFO)
+2026-03-10 11:33:21,818 [INFO] main: hl-signal-daemon starting (dry_run=True, log_level=INFO)
+2026-03-10 11:33:21,822 [INFO] main: Config validation passed
+2026-03-10 11:33:21,824 [INFO] src.engine: Loaded signal: cvd_divergence (CVDDivergenceSignal)
+2026-03-10 11:33:21,825 [INFO] src.engine: Loaded signal: funding_extremes (FundingExtremesSignal)
+2026-03-10 11:33:21,827 [INFO] src.engine: Loaded signal: oi_volume_divergence (OIVolumeDivergenceSignal)
+2026-03-10 11:33:21,827 [INFO] src.engine: Loaded signal: premium_extremes (PremiumExtremesSignal)
+2026-03-10 11:33:21,828 [INFO] src.engine: SignalEngine: 4 signals loaded
+2026-03-10 11:33:21,828 [INFO] src.data.hl_client: HLClient HTTP session started
+2026-03-10 11:33:21,828 [INFO] main: Daemon online — assets=['BTC', 'ETH'] signals=['cvd_divergence', 'funding_extremes', 'oi_volume_divergence', 'premium_extremes']
+2026-03-10 11:33:21,828 [INFO] main: Starting asset context polling every 10s
+2026-03-10 11:33:21,830 [INFO] main: Starting funding history polling every 60s for ['BTC', 'ETH']
+2026-03-10 11:33:21,832 [INFO] src.data.hl_client: HLClient[trades]: connecting to WebSocket
+2026-03-10 11:33:21,834 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:33:21,877 [INFO] main: Starting engine tick loop every 30s
+2026-03-10 11:33:21,878 [INFO] main: DataStore counts: {'funding': {}, 'trades': {}, 'snapshots': {}, 'liquidations': 0}
+2026-03-10 11:33:22,501 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:33:22,527 [INFO] src.data.hl_client: HLClient[trades]: WebSocket connected
+2026-03-10 11:33:53,557 [INFO] main: DataStore counts: {'funding': {'BTC': 48, 'ETH': 48}, 'trades': {'BTC': 124, 'ETH': 57}, 'snapshots': {'BTC': 3, 'ETH': 3}, 'liquidations': 0}
+2026-03-10 11:34:23,072 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:34:24,074 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:34:24,748 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:34:25,146 [INFO] main: DataStore counts: {'funding': {'BTC': 48, 'ETH': 48}, 'trades': {'BTC': 173, 'ETH': 94}, 'snapshots': {'BTC': 6, 'ETH': 6}, 'liquidations': 0}
+2026-03-10 11:34:56,712 [INFO] main: DataStore counts: {'funding': {'BTC': 96, 'ETH': 96}, 'trades': {'BTC': 255, 'ETH': 123}, 'snapshots': {'BTC': 9, 'ETH': 9}, 'liquidations': 0}
+2026-03-10 11:35:25,335 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:35:26,337 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:35:26,960 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:35:28,163 [INFO] main: DataStore counts: {'funding': {'BTC': 96, 'ETH': 96}, 'trades': {'BTC': 379, 'ETH': 169}, 'snapshots': {'BTC': 12, 'ETH': 12}, 'liquidations': 0}
+2026-03-10 11:35:59,704 [INFO] main: DataStore counts: {'funding': {'BTC': 144, 'ETH': 144}, 'trades': {'BTC': 441, 'ETH': 190}, 'snapshots': {'BTC': 14, 'ETH': 14}, 'liquidations': 0}
+2026-03-10 11:36:27,542 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:36:28,545 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:36:29,184 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:36:31,211 [INFO] main: DataStore counts: {'funding': {'BTC': 144, 'ETH': 144}, 'trades': {'BTC': 506, 'ETH': 248}, 'snapshots': {'BTC': 17, 'ETH': 17}, 'liquidations': 0}
+2026-03-10 11:37:02,676 [INFO] main: DataStore counts: {'funding': {'BTC': 192, 'ETH': 192}, 'trades': {'BTC': 571, 'ETH': 266}, 'snapshots': {'BTC': 20, 'ETH': 20}, 'liquidations': 0}
+2026-03-10 11:37:30,113 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:37:31,114 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:37:31,733 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:37:34,221 [INFO] main: DataStore counts: {'funding': {'BTC': 192, 'ETH': 192}, 'trades': {'BTC': 715, 'ETH': 294}, 'snapshots': {'BTC': 23, 'ETH': 23}, 'liquidations': 0}
+2026-03-10 11:38:05,747 [INFO] main: DataStore counts: {'funding': {'BTC': 240, 'ETH': 240}, 'trades': {'BTC': 785, 'ETH': 314}, 'snapshots': {'BTC': 26, 'ETH': 26}, 'liquidations': 0}
+2026-03-10 11:38:32,172 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:38:33,174 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:38:33,722 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:38:37,244 [INFO] main: DataStore counts: {'funding': {'BTC': 240, 'ETH': 240}, 'trades': {'BTC': 867, 'ETH': 337}, 'snapshots': {'BTC': 28, 'ETH': 28}, 'liquidations': 0}
+2026-03-10 11:39:08,774 [INFO] main: DataStore counts: {'funding': {'BTC': 288, 'ETH': 288}, 'trades': {'BTC': 916, 'ETH': 357}, 'snapshots': {'BTC': 31, 'ETH': 31}, 'liquidations': 0}
+2026-03-10 11:39:32,829 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:39:33,832 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:39:34,403 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:39:40,324 [INFO] main: DataStore counts: {'funding': {'BTC': 288, 'ETH': 288}, 'trades': {'BTC': 958, 'ETH': 375}, 'snapshots': {'BTC': 34, 'ETH': 34}, 'liquidations': 0}
+2026-03-10 11:40:11,792 [INFO] main: DataStore counts: {'funding': {'BTC': 336, 'ETH': 336}, 'trades': {'BTC': 1070, 'ETH': 434}, 'snapshots': {'BTC': 37, 'ETH': 37}, 'liquidations': 0}
+2026-03-10 11:40:34,855 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:40:35,857 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:40:36,449 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:40:41,798 [INFO] main: DataStore counts: {'funding': {'BTC': 336, 'ETH': 336}, 'trades': {'BTC': 1123, 'ETH': 457}, 'snapshots': {'BTC': 40, 'ETH': 40}, 'liquidations': 0}
+2026-03-10 11:41:13,302 [INFO] main: DataStore counts: {'funding': {'BTC': 384, 'ETH': 384}, 'trades': {'BTC': 1186, 'ETH': 490}, 'snapshots': {'BTC': 42, 'ETH': 42}, 'liquidations': 0}
+2026-03-10 11:41:37,042 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:41:38,044 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:41:38,637 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:41:44,794 [INFO] main: DataStore counts: {'funding': {'BTC': 384, 'ETH': 384}, 'trades': {'BTC': 1265, 'ETH': 512}, 'snapshots': {'BTC': 45, 'ETH': 45}, 'liquidations': 0}
+2026-03-10 11:42:16,254 [INFO] main: DataStore counts: {'funding': {'BTC': 432, 'ETH': 432}, 'trades': {'BTC': 1338, 'ETH': 597}, 'snapshots': {'BTC': 48, 'ETH': 48}, 'liquidations': 0}
+2026-03-10 11:42:39,278 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:42:40,280 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:42:40,825 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:42:47,823 [INFO] main: DataStore counts: {'funding': {'BTC': 432, 'ETH': 432}, 'trades': {'BTC': 1440, 'ETH': 623}, 'snapshots': {'BTC': 51, 'ETH': 51}, 'liquidations': 0}
+2026-03-10 11:43:19,482 [INFO] main: DataStore counts: {'funding': {'BTC': 480, 'ETH': 480}, 'trades': {'BTC': 1657, 'ETH': 690}, 'snapshots': {'BTC': 54, 'ETH': 54}, 'liquidations': 0}
+2026-03-10 11:43:41,350 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:43:42,351 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:43:43,029 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:43:50,893 [INFO] main: DataStore counts: {'funding': {'BTC': 480, 'ETH': 480}, 'trades': {'BTC': 1798, 'ETH': 865}, 'snapshots': {'BTC': 57, 'ETH': 57}, 'liquidations': 0}
+2026-03-10 11:44:22,426 [INFO] main: DataStore counts: {'funding': {'BTC': 528, 'ETH': 528}, 'trades': {'BTC': 1878, 'ETH': 886}, 'snapshots': {'BTC': 59, 'ETH': 59}, 'liquidations': 0}
+2026-03-10 11:44:43,436 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:44:44,438 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:44:45,053 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:44:53,935 [INFO] main: DataStore counts: {'funding': {'BTC': 528, 'ETH': 528}, 'trades': {'BTC': 2063, 'ETH': 914}, 'snapshots': {'BTC': 62, 'ETH': 62}, 'liquidations': 0}
+2026-03-10 11:45:25,484 [INFO] main: DataStore counts: {'funding': {'BTC': 576, 'ETH': 576}, 'trades': {'BTC': 2212, 'ETH': 944}, 'snapshots': {'BTC': 65, 'ETH': 65}, 'liquidations': 0}
+2026-03-10 11:45:44,071 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:45:45,074 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:45:45,718 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:45:57,099 [INFO] main: DataStore counts: {'funding': {'BTC': 576, 'ETH': 576}, 'trades': {'BTC': 2312, 'ETH': 965}, 'snapshots': {'BTC': 68, 'ETH': 68}, 'liquidations': 0}
+2026-03-10 11:46:27,103 [INFO] main: DataStore counts: {'funding': {'BTC': 624, 'ETH': 624}, 'trades': {'BTC': 2392, 'ETH': 984}, 'snapshots': {'BTC': 70, 'ETH': 70}, 'liquidations': 0}
+2026-03-10 11:46:45,023 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:46:46,024 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:46:57,115 [INFO] main: DataStore counts: {'funding': {'BTC': 624, 'ETH': 624}, 'trades': {'BTC': 2468, 'ETH': 994}, 'snapshots': {'BTC': 72, 'ETH': 72}, 'liquidations': 0}
+2026-03-10 11:47:02,299 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:47:27,120 [INFO] main: DataStore counts: {'funding': {'BTC': 672, 'ETH': 672}, 'trades': {'BTC': 2606, 'ETH': 1011}, 'snapshots': {'BTC': 74, 'ETH': 74}, 'liquidations': 0}
+2026-03-10 11:47:58,550 [INFO] main: DataStore counts: {'funding': {'BTC': 672, 'ETH': 672}, 'trades': {'BTC': 2736, 'ETH': 1053}, 'snapshots': {'BTC': 76, 'ETH': 76}, 'liquidations': 0}
+2026-03-10 11:48:02,926 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:48:03,928 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:48:11,976 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:48:28,564 [INFO] main: DataStore counts: {'funding': {'BTC': 672, 'ETH': 672}, 'trades': {'BTC': 3171, 'ETH': 1088}, 'snapshots': {'BTC': 78, 'ETH': 78}, 'liquidations': 0}
+2026-03-10 11:48:58,573 [INFO] main: DataStore counts: {'funding': {'BTC': 720, 'ETH': 720}, 'trades': {'BTC': 3236, 'ETH': 1105}, 'snapshots': {'BTC': 80, 'ETH': 80}, 'liquidations': 0}
+2026-03-10 11:49:12,545 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:49:13,547 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:49:14,615 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:49:29,507 [INFO] main: DataStore counts: {'funding': {'BTC': 720, 'ETH': 720}, 'trades': {'BTC': 3323, 'ETH': 1150}, 'snapshots': {'BTC': 82, 'ETH': 82}, 'liquidations': 0}
+2026-03-10 11:49:59,512 [INFO] main: DataStore counts: {'funding': {'BTC': 768, 'ETH': 768}, 'trades': {'BTC': 3389, 'ETH': 1174}, 'snapshots': {'BTC': 85, 'ETH': 85}, 'liquidations': 0}
+2026-03-10 11:50:15,051 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:50:16,053 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:50:17,390 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:50:30,441 [INFO] main: DataStore counts: {'funding': {'BTC': 768, 'ETH': 768}, 'trades': {'BTC': 3444, 'ETH': 1197}, 'snapshots': {'BTC': 88, 'ETH': 88}, 'liquidations': 0}
+2026-03-10 11:51:00,463 [INFO] main: DataStore counts: {'funding': {'BTC': 816, 'ETH': 816}, 'trades': {'BTC': 3497, 'ETH': 1211}, 'snapshots': {'BTC': 90, 'ETH': 90}, 'liquidations': 0}
+2026-03-10 11:51:17,844 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:51:18,846 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:51:20,135 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:51:31,687 [INFO] main: DataStore counts: {'funding': {'BTC': 816, 'ETH': 816}, 'trades': {'BTC': 3682, 'ETH': 1245}, 'snapshots': {'BTC': 93, 'ETH': 93}, 'liquidations': 0}
+2026-03-10 11:52:02,854 [INFO] main: DataStore counts: {'funding': {'BTC': 864, 'ETH': 864}, 'trades': {'BTC': 3841, 'ETH': 1260}, 'snapshots': {'BTC': 96, 'ETH': 96}, 'liquidations': 0}
+2026-03-10 11:52:20,851 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:52:21,853 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:52:23,507 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:52:34,072 [INFO] main: DataStore counts: {'funding': {'BTC': 864, 'ETH': 864}, 'trades': {'BTC': 4012, 'ETH': 1299}, 'snapshots': {'BTC': 99, 'ETH': 99}, 'liquidations': 0}
+2026-03-10 11:53:05,329 [INFO] main: DataStore counts: {'funding': {'BTC': 912, 'ETH': 912}, 'trades': {'BTC': 4130, 'ETH': 1331}, 'snapshots': {'BTC': 101, 'ETH': 101}, 'liquidations': 0}
+2026-03-10 11:53:24,607 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:53:25,609 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:53:27,179 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:53:36,913 [INFO] main: DataStore counts: {'funding': {'BTC': 912, 'ETH': 912}, 'trades': {'BTC': 4326, 'ETH': 1356}, 'snapshots': {'BTC': 104, 'ETH': 104}, 'liquidations': 0}
+2026-03-10 11:54:08,254 [INFO] main: DataStore counts: {'funding': {'BTC': 960, 'ETH': 960}, 'trades': {'BTC': 4449, 'ETH': 1372}, 'snapshots': {'BTC': 107, 'ETH': 107}, 'liquidations': 0}
+2026-03-10 11:54:27,529 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:54:28,532 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:54:29,670 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:54:39,689 [INFO] main: DataStore counts: {'funding': {'BTC': 960, 'ETH': 960}, 'trades': {'BTC': 4609, 'ETH': 1398}, 'snapshots': {'BTC': 109, 'ETH': 109}, 'liquidations': 0}
+2026-03-10 11:55:11,133 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 4783, 'ETH': 1430}, 'snapshots': {'BTC': 112, 'ETH': 112}, 'liquidations': 0}
+2026-03-10 11:55:28,247 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:55:29,249 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:55:31,552 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:55:42,475 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 4865, 'ETH': 1490}, 'snapshots': {'BTC': 115, 'ETH': 115}, 'liquidations': 0}
+2026-03-10 11:56:14,234 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5004, 'ETH': 1526}, 'snapshots': {'BTC': 117, 'ETH': 117}, 'liquidations': 0}
+2026-03-10 11:56:45,258 [ERROR] src.data.hl_client: HLClient unexpected error for payload metaAndAssetCtxs: 
+Traceback (most recent call last):
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 539, in start
+    message, payload = await protocol.read()  # type: ignore[union-attr]
+                       ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/streams.py", line 703, in read
+    await self._waiter
+asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/athan/projects/alpha/trading-tools/hl-signal-daemon/src/data/hl_client.py", line 62, in _post
+    async with self._session.post(_BASE_HTTP, json=payload) as resp:
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/client.py", line 1510, in __aenter__
+    self._resp: _RetType = await self._coro
+                           ^^^^^^^^^^^^^^^^
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/client.py", line 779, in _request
+    resp = await handler(req)
+           ^^^^^^^^^^^^^^^^^^
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/client.py", line 757, in _connect_and_send_request
+    await resp.start(conn)
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/client_reqrep.py", line 534, in start
+    with self._timer:
+  File "/home/athan/.local/lib/python3.12/site-packages/aiohttp/helpers.py", line 713, in __exit__
+    raise asyncio.TimeoutError from exc_val
+TimeoutError
+2026-03-10 11:56:45,276 [WARNING] main: poll_asset_contexts: got None from API
+2026-03-10 11:56:45,778 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5004, 'ETH': 1526}, 'snapshots': {'BTC': 117, 'ETH': 117}, 'liquidations': 0}
+2026-03-10 11:56:52,260 [WARNING] src.data.hl_client: HLClient[liquidations]: WS closed/errored: WSMessage(type=<WSMsgType.ERROR: 258>, data=ServerTimeoutError('No PONG received after 15.0 seconds'), extra=None)
+2026-03-10 11:56:52,264 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:56:53,266 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:56:53,878 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:56:59,254 [WARNING] src.data.hl_client: HLClient[trades]: WS closed/errored: WSMessage(type=<WSMsgType.ERROR: 258>, data=ServerTimeoutError('No PONG received after 15.0 seconds'), extra=None)
+2026-03-10 11:56:59,255 [INFO] src.data.hl_client: HLClient[trades]: reconnecting in 1.0s
+2026-03-10 11:57:00,261 [INFO] src.data.hl_client: HLClient[trades]: connecting to WebSocket
+2026-03-10 11:57:00,815 [INFO] src.data.hl_client: HLClient[trades]: WebSocket connected
+2026-03-10 11:57:16,950 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5069, 'ETH': 1566}, 'snapshots': {'BTC': 119, 'ETH': 119}, 'liquidations': 0}
+2026-03-10 11:57:48,339 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5487, 'ETH': 1582}, 'snapshots': {'BTC': 122, 'ETH': 122}, 'liquidations': 0}
+2026-03-10 11:57:54,166 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:57:55,168 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:57:55,839 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:58:18,357 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5523, 'ETH': 1597}, 'snapshots': {'BTC': 125, 'ETH': 125}, 'liquidations': 0}
+2026-03-10 11:58:49,788 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5564, 'ETH': 1607}, 'snapshots': {'BTC': 128, 'ETH': 128}, 'liquidations': 0}
+2026-03-10 11:58:56,397 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:58:57,400 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:58:58,076 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 11:59:21,192 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5635, 'ETH': 1620}, 'snapshots': {'BTC': 130, 'ETH': 130}, 'liquidations': 0}
+2026-03-10 11:59:52,609 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5719, 'ETH': 1660}, 'snapshots': {'BTC': 133, 'ETH': 133}, 'liquidations': 0}
+2026-03-10 11:59:57,381 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 11:59:58,383 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 11:59:59,024 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:00:24,028 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5898, 'ETH': 1730}, 'snapshots': {'BTC': 136, 'ETH': 136}, 'liquidations': 0}
+2026-03-10 12:00:55,455 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 5995, 'ETH': 1771}, 'snapshots': {'BTC': 139, 'ETH': 139}, 'liquidations': 0}
+2026-03-10 12:00:59,986 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:01:00,988 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:01:01,658 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:01:25,988 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 6114, 'ETH': 1838}, 'snapshots': {'BTC': 142, 'ETH': 142}, 'liquidations': 0}
+2026-03-10 12:01:57,110 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 6279, 'ETH': 1922}, 'snapshots': {'BTC': 145, 'ETH': 145}, 'liquidations': 0}
+2026-03-10 12:02:01,657 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:02:02,658 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:02:03,326 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:02:28,089 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 6350, 'ETH': 1953}, 'snapshots': {'BTC': 147, 'ETH': 147}, 'liquidations': 0}
+2026-03-10 12:02:59,237 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 6408, 'ETH': 1982}, 'snapshots': {'BTC': 150, 'ETH': 150}, 'liquidations': 0}
+2026-03-10 12:03:03,768 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:03:04,770 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:03:05,426 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:03:30,268 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 6518, 'ETH': 2011}, 'snapshots': {'BTC': 153, 'ETH': 153}, 'liquidations': 0}
+2026-03-10 12:04:01,383 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 6930, 'ETH': 2079}, 'snapshots': {'BTC': 156, 'ETH': 156}, 'liquidations': 0}
+2026-03-10 12:04:05,765 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:04:06,768 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:04:07,398 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:04:32,567 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 7436, 'ETH': 2120}, 'snapshots': {'BTC': 159, 'ETH': 159}, 'liquidations': 0}
+2026-03-10 12:05:03,777 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 7599, 'ETH': 2174}, 'snapshots': {'BTC': 161, 'ETH': 161}, 'liquidations': 0}
+2026-03-10 12:05:11,821 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:05:12,824 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:05:13,521 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:05:35,037 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 7687, 'ETH': 2229}, 'snapshots': {'BTC': 164, 'ETH': 164}, 'liquidations': 0}
+2026-03-10 12:06:05,088 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 7836, 'ETH': 2321}, 'snapshots': {'BTC': 167, 'ETH': 167}, 'liquidations': 0}
+2026-03-10 12:06:13,887 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:06:14,891 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:06:15,544 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:06:36,310 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 7977, 'ETH': 2386}, 'snapshots': {'BTC': 170, 'ETH': 170}, 'liquidations': 0}
+2026-03-10 12:07:07,480 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 8197, 'ETH': 2428}, 'snapshots': {'BTC': 173, 'ETH': 173}, 'liquidations': 0}
+2026-03-10 12:07:16,022 [INFO] src.data.hl_client: HLClient[liquidations]: reconnecting in 1.0s
+2026-03-10 12:07:17,026 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-10 12:07:17,620 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-10 12:07:38,640 [INFO] main: DataStore counts: {'funding': {'BTC': 1000, 'ETH': 1000}, 'trades': {'BTC': 8717, 'ETH': 2593}, 'snapshots': {'BTC': 175, 'ETH': 175}, 'liquidations': 0}
+2026-03-10 12:07:40,122 [INFO] main: Received signal 2 — initiating graceful shutdown
+2026-03-10 12:07:40,558 [INFO] src.data.hl_client: HLClient[trades]: WebSocket task stopped
+2026-03-10 12:08:16,846 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket task stopped
+2026-03-10 12:08:16,847 [INFO] main: Shutting down all tasks...
+2026-03-10 12:08:16,848 [INFO] src.data.hl_client: HLClient HTTP session closed
+2026-03-10 12:08:16,849 [INFO] main: hl-signal-daemon stopped
+2026-03-11 00:01:54,728 [INFO] main: hl-signal-daemon v2 starting (dry_run=True)
+2026-03-11 00:01:54,733 [INFO] main: Config validation passed
+2026-03-11 00:01:54,863 [INFO] src.db.store: SQLiteDataStore opened: data.db
+2026-03-11 00:01:54,866 [INFO] src.engine: Loaded signal: cvd_divergence (CVDDivergenceSignal)
+2026-03-11 00:01:54,867 [INFO] src.engine: Loaded signal: funding_extremes (FundingExtremesSignal)
+2026-03-11 00:01:54,868 [INFO] src.engine: Loaded signal: oi_volume_divergence (OIVolumeDivergenceSignal)
+2026-03-11 00:01:54,870 [INFO] src.engine: Loaded signal: premium_extremes (PremiumExtremesSignal)
+2026-03-11 00:01:54,871 [INFO] src.engine: Loaded signal: spot_led_flow (SpotLedFlowSignal)
+2026-03-11 00:01:54,872 [INFO] src.engine: Loaded signal: vwap_deviation (VWAPDeviationSignal)
+2026-03-11 00:01:54,872 [INFO] src.engine: SignalEngine: 6 signals loaded
+2026-03-11 00:01:54,873 [INFO] src.data.hl_client: HLClient HTTP session started
+2026-03-11 00:01:54,873 [INFO] src.data.bybit_client: BybitClient started
+2026-03-11 00:01:54,873 [INFO] main: Daemon online — assets=['BTC', 'ETH'] signals=['cvd_divergence', 'funding_extremes', 'oi_volume_divergence', 'premium_extremes', 'spot_led_flow', 'vwap_deviation'] db=data.db
+2026-03-11 00:01:54,873 [INFO] main: Starting HL asset context polling every 10s
+2026-03-11 00:01:54,875 [INFO] main: Starting HL funding history polling every 60s
+2026-03-11 00:01:54,876 [INFO] src.data.hl_client: HLClient[trades]: connecting to WebSocket
+2026-03-11 00:01:54,908 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-11 00:01:54,909 [INFO] main: Starting Bybit OHLCV polling every 3600s
+2026-03-11 00:01:54,910 [INFO] main: Starting Bybit OI polling every 3600s
+2026-03-11 00:01:54,911 [INFO] main: Starting Bybit volume polling every 3600s
+2026-03-11 00:01:54,911 [INFO] main: Starting engine tick loop every 30s
+2026-03-11 00:01:54,913 [INFO] main: DataStore counts: {'funding_rates': 0, 'open_interest': 0, 'volume_snapshots': 0, 'ohlcv': 0, 'asset_snapshots': 0, 'trade_candidates': 0}
+2026-03-11 00:02:08,778 [INFO] src.data.hl_client: HLClient[trades]: WebSocket connected
+2026-03-11 00:02:08,779 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-11 00:02:15,784 [INFO] main: Received signal 15 — initiating graceful shutdown
+2026-03-11 00:02:16,689 [INFO] src.data.hl_client: HLClient[trades]: WebSocket task stopped
+2026-03-11 00:02:32,898 [INFO] main: Received signal 2 — initiating graceful shutdown
+2026-03-11 00:03:08,649 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket task stopped
+2026-03-11 00:03:08,650 [INFO] main: Shutting down...
+2026-03-11 00:03:08,650 [INFO] src.data.hl_client: HLClient HTTP session closed
+2026-03-11 00:03:08,650 [INFO] src.data.bybit_client: BybitClient closed
+2026-03-11 00:03:08,669 [INFO] src.db.store: SQLiteDataStore closed
+2026-03-11 00:03:08,669 [INFO] main: hl-signal-daemon stopped
+2026-03-11 00:07:16,342 [INFO] main: hl-signal-daemon v2 starting (dry_run=True)
+2026-03-11 00:07:16,367 [INFO] main: Config validation passed
+2026-03-11 00:07:16,373 [INFO] src.db.store: SQLiteDataStore opened: data.db
+2026-03-11 00:07:16,377 [INFO] src.engine: Loaded signal: cvd_divergence (CVDDivergenceSignal)
+2026-03-11 00:07:16,379 [INFO] src.engine: Loaded signal: funding_extremes (FundingExtremesSignal)
+2026-03-11 00:07:16,381 [INFO] src.engine: Loaded signal: oi_volume_divergence (OIVolumeDivergenceSignal)
+2026-03-11 00:07:16,382 [INFO] src.engine: Loaded signal: premium_extremes (PremiumExtremesSignal)
+2026-03-11 00:07:16,384 [INFO] src.engine: Loaded signal: spot_led_flow (SpotLedFlowSignal)
+2026-03-11 00:07:16,385 [INFO] src.engine: Loaded signal: vwap_deviation (VWAPDeviationSignal)
+2026-03-11 00:07:16,386 [INFO] src.engine: SignalEngine: 6 signals loaded
+2026-03-11 00:07:16,386 [INFO] src.data.hl_client: HLClient HTTP session started
+2026-03-11 00:07:16,386 [INFO] src.data.bybit_client: BybitClient started
+2026-03-11 00:07:16,387 [INFO] main: Daemon online — assets=['BTC', 'ETH'] signals=['cvd_divergence', 'funding_extremes', 'oi_volume_divergence', 'premium_extremes', 'spot_led_flow', 'vwap_deviation'] db=data.db
+2026-03-11 00:07:16,387 [INFO] main: Starting HL asset context polling every 10s
+2026-03-11 00:07:16,389 [INFO] main: Starting HL funding history polling every 60s
+2026-03-11 00:07:16,390 [INFO] src.data.hl_client: HLClient[trades]: connecting to WebSocket
+2026-03-11 00:07:16,392 [INFO] src.data.hl_client: HLClient[liquidations]: connecting to WebSocket
+2026-03-11 00:07:16,393 [INFO] main: Starting HL OHLCV polling every 3600s
+2026-03-11 00:07:16,394 [INFO] main: Starting Bybit OI polling (fallback) every 3600s
+2026-03-11 00:07:16,396 [INFO] main: Starting Bybit volume polling every 3600s
+2026-03-11 00:07:16,396 [INFO] main: Starting engine tick loop every 30s
+2026-03-11 00:07:16,402 [INFO] src.engine: Confluence ETH: regime=Funding Fade conviction=LOW direction=LONG_BIAS signals=['funding_extremes']
+2026-03-11 00:07:16,402 [INFO] main: Trade candidate: ETH LONG_BIAS [LOW] Funding Fade — 1 signals
+2026-03-11 00:07:16,421 [INFO] main: DataStore counts: {'funding_rates': 96, 'open_interest': 102, 'volume_snapshots': 201, 'ohlcv': 100, 'asset_snapshots': 2, 'trade_candidates': 1}
+2026-03-11 00:07:28,016 [INFO] src.data.hl_client: HLClient[trades]: WebSocket connected
+2026-03-11 00:07:28,789 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket connected
+2026-03-11 00:07:42,174 [INFO] main: Received signal 15 — initiating graceful shutdown
+2026-03-11 00:07:42,528 [INFO] src.data.hl_client: HLClient[trades]: WebSocket task stopped
+2026-03-11 00:08:27,740 [INFO] src.data.hl_client: HLClient[liquidations]: WebSocket task stopped
+2026-03-11 00:08:27,742 [INFO] main: Shutting down...
+2026-03-11 00:08:27,742 [INFO] src.data.hl_client: HLClient HTTP session closed
+2026-03-11 00:08:27,742 [INFO] src.data.bybit_client: BybitClient closed
+2026-03-11 00:08:27,764 [INFO] src.db.store: SQLiteDataStore closed
+2026-03-11 00:08:27,764 [INFO] main: hl-signal-daemon stopped

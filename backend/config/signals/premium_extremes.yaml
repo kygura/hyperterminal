@@ -1,0 +1,9 @@
+enabled: true
+lookback_minutes: 120
+thresholds:
+  low: 0.15
+  medium: 0.25
+  high: 0.40
+premium_velocity_weight: 0.3
+velocity_lookback_minutes: 15
+min_snapshots: 12

@@ -1,0 +1,19 @@
+enabled: true
+
+# Set to true to emit standalone signal results
+# Default false: acts as modifier only for the confluence engine
+enabled_standalone: false
+
+# Session VWAP lookback — how far back to look for OHLCV data
+vwap_lookback_hours: 24
+
+# Deviation band thresholds (in σ units)
+deviation_band_1: 1.0
+deviation_band_2: 2.0
+
+# Priority thresholds (abs deviation in σ)
+# Only relevant when enabled_standalone: true
+thresholds:
+  low: 0.5     # ±0.5σ → LOW
+  medium: 1.0  # ±1.0σ → MEDIUM
+  high: 2.0    # ±2.0σ → HIGH
