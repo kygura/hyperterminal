@@ -45,6 +45,8 @@ from engine.signal_engine import SignalEngine, TradeCandidate
 from alerts import AlertManager
 from telegram_bot import TelegramBot
 
+_CONVICTION_RANK: dict[str, int] = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+
 _TIMEFRAME_PROFILES = {
     "hourly": {
         "context_poll_seconds": 300,
@@ -535,9 +537,21 @@ async def process_signal_candidates(
     dry_run: bool,
     timeframe: str,
     on_candidate=None,
+    min_conviction: Optional[str] = None,
 ) -> None:
     results = await engine.evaluate_all(coins)
     candidates = engine.score_confluence(results)
+
+    # Filter by conviction floor if set
+    if min_conviction is not None:
+        floor = _CONVICTION_RANK.get(min_conviction, 0)
+        suppressed = [c for c in candidates if _CONVICTION_RANK.get(c.conviction, 0) < floor]
+        candidates = [c for c in candidates if _CONVICTION_RANK.get(c.conviction, 0) >= floor]
+        if suppressed:
+            logger.debug(
+                "process_signal_candidates: suppressed %d below-%s candidate(s) for %s",
+                len(suppressed), min_conviction, [c.coin for c in suppressed],
+            )
 
     for candidate in candidates:
         if not alert_manager.should_fire(candidate):
@@ -665,6 +679,7 @@ async def signal_refresh_loop(
                         dry_run=dry_run,
                         timeframe=timeframe,
                         on_candidate=on_candidate,
+                        min_conviction="HIGH",
                     )
                 except Exception as exc:
                     logger.error("signal_refresh_loop error: %s", exc, exc_info=True)
