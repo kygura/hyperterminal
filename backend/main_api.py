@@ -41,6 +41,7 @@ from main_daemon import (
     run_l2book_ws,
     run_liquidations_ws,
     run_trades_ws,
+    signal_refresh_loop,
     validate_config,
     health_check_loop,
 )
@@ -234,6 +235,18 @@ async def start_signal_runtime() -> None:
         )
 
     signal_stop_event = asyncio.Event()
+    signal_refresh_queue: Optional[asyncio.Queue[str]] = None
+    if runtime["signal_refresh_enabled"]:
+        signal_refresh_queue = asyncio.Queue(maxsize=1000)
+
+    def _enqueue_signal_refresh(coin: str) -> None:
+        if signal_refresh_queue is None:
+            return
+        try:
+            signal_refresh_queue.put_nowait(coin)
+        except asyncio.QueueFull:
+            logger.debug("Signal refresh queue full; dropping update for %s", coin)
+
     signal_tasks = [
         asyncio.create_task(
             poll_asset_contexts(
@@ -242,6 +255,7 @@ async def start_signal_runtime() -> None:
                 coins,
                 runtime["context_poll_seconds"],
                 signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="signal_poll_hl_context",
         ),
@@ -253,11 +267,18 @@ async def start_signal_runtime() -> None:
                 runtime["funding_poll_seconds"],
                 lookback_hours,
                 signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="signal_poll_hl_funding",
         ),
         asyncio.create_task(
-            run_trades_ws(signal_hl_client, signal_store, coins, signal_stop_event),
+            run_trades_ws(
+                signal_hl_client,
+                signal_store,
+                coins,
+                signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="signal_ws_trades",
         ),
         asyncio.create_task(
@@ -268,11 +289,17 @@ async def start_signal_runtime() -> None:
                 signal_stop_event,
                 snapshot_interval_s=orderbook_snapshot_s,
                 depth_levels=orderbook_depth_levels,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="signal_ws_l2book",
         ),
         asyncio.create_task(
-            run_liquidations_ws(signal_hl_client, signal_store, signal_stop_event),
+            run_liquidations_ws(
+                signal_hl_client,
+                signal_store,
+                signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="signal_ws_liquidations",
         ),
         asyncio.create_task(
@@ -282,6 +309,7 @@ async def start_signal_runtime() -> None:
                 coins,
                 runtime["bybit_ohlcv_seconds"],
                 signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="signal_poll_hl_ohlcv",
         ),
@@ -292,6 +320,7 @@ async def start_signal_runtime() -> None:
                 coins,
                 runtime["bybit_oi_seconds"],
                 signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="signal_poll_bybit_oi",
         ),
@@ -302,6 +331,7 @@ async def start_signal_runtime() -> None:
                 coins,
                 runtime["bybit_volume_seconds"],
                 signal_stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="signal_poll_bybit_volume",
         ),
@@ -319,6 +349,27 @@ async def start_signal_runtime() -> None:
                 _broadcast_signal,
             ),
             name="signal_engine_tick",
+        ),
+        *(
+            [
+                asyncio.create_task(
+                    signal_refresh_loop(
+                        signal_engine,
+                        alert_manager,
+                        signal_store,
+                        signal_telegram,
+                        signal_refresh_queue,
+                        runtime["signal_refresh_debounce_seconds"],
+                        signal_stop_event,
+                        not telegram_enabled,
+                        runtime["timeframe"],
+                        _broadcast_signal,
+                    ),
+                    name="signal_refresh_loop",
+                )
+            ]
+            if signal_refresh_queue is not None
+            else []
         ),
         asyncio.create_task(
             log_data_counts(signal_store, 60, signal_stop_event),

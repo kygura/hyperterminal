@@ -10,7 +10,6 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from data.store import DataStore
 from signals.base import BaseSignal, SignalResult
 
 
@@ -25,7 +24,7 @@ class CVDDivergenceSignal(BaseSignal):
         min_trades = self.config.get("min_trades", 100)
 
         lookback_ms = int(lookback_minutes * 60 * 1000)
-        trades = self.store.get_trades_window(coin, lookback_ms)
+        trades = self._get_trade_ticks(coin, lookback_ms)
 
         if len(trades) < min_trades:
             self.logger.debug(
@@ -33,7 +32,7 @@ class CVDDivergenceSignal(BaseSignal):
             )
             return None
 
-        # Price change: first to last trade
+        # Use raw trade ticks when available; pseudo-volume buckets do not preserve price.
         price_start = trades[0]["px"]
         price_end = trades[-1]["px"]
         if price_start == 0:
@@ -58,7 +57,7 @@ class CVDDivergenceSignal(BaseSignal):
         def _cvd(tlist: list) -> float:
             total = 0.0
             for t in tlist:
-                notional = t["sz"] * t["px"]
+                notional = t.get("notional", t["sz"] * t["px"])
                 total += notional if t["side"] == "B" else -notional
             return total
 
@@ -127,3 +126,8 @@ class CVDDivergenceSignal(BaseSignal):
                 "trade_count": len(trades),
             },
         )
+
+    def _get_trade_ticks(self, coin: str, lookback_ms: int) -> list[dict]:
+        if hasattr(self.store, "get_trade_ticks"):
+            return self.store.get_trade_ticks(coin, lookback_ms)
+        return self.store.get_trades_window(coin, lookback_ms)

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import time
 from pathlib import Path
 
 from db.store import SQLiteDataStore
 from engine.signal_engine import SignalEngine
+from signals.base import BaseSignal, SignalResult
+from signals.cvd import CVDDivergenceSignal
 from signals.funding_velocity import FundingVelocitySignal
 from signals.leverage_flush import LeverageFlushSignal
 from signals.liquidation_cascade import LiquidationCascadeSignal
@@ -149,3 +152,83 @@ def test_signal_engine_matches_new_regime(tmp_path):
     assert regime == "Leverage Flush"
     assert conviction == "HIGH"
     store.close()
+
+
+def test_signal_engine_caches_repeated_store_reads_within_coin(tmp_path):
+    class CountingStore:
+        def __init__(self) -> None:
+            self.snapshot_calls = 0
+
+        def get_snapshots_window(self, coin: str, lookback_ms: int) -> list[dict]:
+            self.snapshot_calls += 1
+            return [
+                {
+                    "time": 0.0,
+                    "mark_px": 100_000.0,
+                    "oracle_px": 100_000.0,
+                    "funding": 0.0,
+                    "oi": 1_000_000.0,
+                    "premium": 0.0,
+                }
+            ]
+
+    class SnapshotSignal(BaseSignal):
+        def evaluate(self, coin: str):
+            snapshots = self.store.get_snapshots_window(coin, 60_000)
+            if not snapshots:
+                return None
+            return SignalResult(
+                signal_name=self.name,
+                coin=coin,
+                direction="LONG_BIAS",
+                strength=0.5,
+                priority="LOW",
+                message="ok",
+                timestamp=time.time(),
+            )
+
+    store = CountingStore()
+    engine = SignalEngine(config_dir=str(Path(__file__).resolve().parents[1] / "config"), global_config={"assets": ["BTC"]}, store=store)
+    engine._signals = [
+        SnapshotSignal(name="one", config={}, store=store),
+        SnapshotSignal(name="two", config={}, store=store),
+    ]
+    engine._vwap_signal = None
+
+    asyncio.run(engine.evaluate_all(["BTC"]))
+
+    assert store.snapshot_calls == 1
+
+
+def test_cvd_signal_uses_raw_trade_ticks(tmp_path):
+    class CvdStore:
+        def get_trade_ticks(self, coin: str, lookback_ms: int) -> list[dict]:
+            return [
+                {"ts": 1, "asset": coin, "side": "S", "px": 100.0, "sz": 1.0, "notional": 100.0},
+                {"ts": 2, "asset": coin, "side": "S", "px": 99.0, "sz": 1.0, "notional": 99.0},
+                {"ts": 3, "asset": coin, "side": "B", "px": 98.0, "sz": 1.0, "notional": 98.0},
+                {"ts": 4, "asset": coin, "side": "B", "px": 97.0, "sz": 1.0, "notional": 97.0},
+            ]
+
+        def get_trades_window(self, coin: str, lookback_ms: int) -> list[dict]:
+            return [
+                {"side": "B", "px": 1.0, "sz": 100.0, "time": 1},
+                {"side": "S", "px": 1.0, "sz": 100.0, "time": 2},
+            ]
+
+    signal = CVDDivergenceSignal(
+        name="cvd_divergence",
+        config={
+            "lookback_minutes": 30,
+            "price_change_threshold_pct": 0.5,
+            "cvd_reversal_threshold_pct": -20.0,
+            "thresholds": {"low": 1.0, "medium": 1.5, "high": 2.0},
+            "min_trades": 2,
+        },
+        store=CvdStore(),
+    )
+
+    result = signal.evaluate("BTC")
+
+    assert result is not None
+    assert result.coin == "BTC"

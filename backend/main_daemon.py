@@ -5,9 +5,10 @@ Data sources:
   - Hyperliquid REST (funding history, asset snapshots) + WebSocket (live trades, liquidations)
   - Bybit REST (OHLCV 1h candles, open interest, spot volume) — scheduled hourly
 
-Signal modules (all run each tick):
+Signal modules:
   - FundingExtremesSignal, OIVolumeDivergenceSignal, CVDDivergenceSignal, PremiumExtremesSignal
-  - SpotLedFlowSignal (v2), VWAPDeviationSignal (v2, modifier)
+  - SpotLedFlowSignal (only when explicit spot volume is present), VWAPDeviationSignal (v2, modifier)
+  - Websocket-fed signals also refresh on a debounced live-update path
 
 Confluence engine: named-regime detection with conflict resolution.
 
@@ -32,7 +33,7 @@ import os
 import signal
 import sys
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 import yaml
 from dotenv import load_dotenv
@@ -162,6 +163,7 @@ def resolve_runtime_settings(global_config: dict) -> dict:
     engine = global_config.get("engine", {})
     alerts = global_config.get("alerts", {})
     profile = _TIMEFRAME_PROFILES[timeframe]
+    signal_refresh_enabled = bool(engine.get("signal_refresh_enabled", True))
 
     def resolved(section: dict, key: str) -> int:
         configured = section.get(key)
@@ -178,6 +180,8 @@ def resolve_runtime_settings(global_config: dict) -> dict:
         "bybit_oi_seconds": resolved(polling, "bybit_oi_seconds"),
         "bybit_volume_seconds": resolved(polling, "bybit_volume_seconds"),
         "tick_interval_seconds": resolved(engine, "tick_interval_seconds"),
+        "signal_refresh_enabled": signal_refresh_enabled,
+        "signal_refresh_debounce_seconds": float(engine.get("signal_refresh_debounce_seconds", 2.0)),
         "cooldown_seconds": max(
             int(alerts.get("cooldown_seconds", profile["cooldown_seconds"])),
             int(profile["cooldown_seconds"]),
@@ -217,6 +221,7 @@ async def poll_asset_contexts(
     coins: list[str],
     interval_s: int,
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     logger.info("Starting HL asset context polling every %ds", interval_s)
     while not stop_event.is_set():
@@ -235,6 +240,8 @@ async def poll_asset_contexts(
                             premium=ctx["premium"],
                             source="hyperliquid",
                         )
+                        if on_update is not None:
+                            on_update(coin)
             else:
                 logger.warning("poll_asset_contexts: got None from HL API")
         except Exception as exc:
@@ -253,6 +260,7 @@ async def poll_funding_history(
     interval_s: int,
     lookback_hours: int,
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     logger.info("Starting HL funding history polling every %ds", interval_s)
     while not stop_event.is_set():
@@ -270,6 +278,8 @@ async def poll_funding_history(
                             ts=entry["time"],
                             source="hyperliquid",
                         )
+                    if on_update is not None:
+                        on_update(coin)
             except Exception as exc:
                 logger.error("poll_funding_history error for %s: %s", coin, exc, exc_info=True)
 
@@ -284,9 +294,12 @@ async def run_trades_ws(
     store: SQLiteDataStore,
     coins: list[str],
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     def on_trade(coin: str, side: str, px: float, sz: float, ts: int) -> None:
         store.add_trade(coin, side, px, sz, ts)
+        if on_update is not None:
+            on_update(coin)
 
     await client.connect_trades_ws(coins, on_trade, stop_event)
 
@@ -298,6 +311,7 @@ async def run_l2book_ws(
     stop_event: asyncio.Event,
     snapshot_interval_s: int = 30,
     depth_levels: int = 10,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     last_persisted: dict[str, int] = {}
 
@@ -313,6 +327,8 @@ async def run_l2book_ws(
             depth_levels=depth_levels,
         )
         last_persisted[coin] = ts
+        if on_update is not None:
+            on_update(coin)
 
     await client.connect_l2book_ws(coins, on_book, stop_event)
 
@@ -321,9 +337,12 @@ async def run_liquidations_ws(
     client: HLClient,
     store: SQLiteDataStore,
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     def on_liq(coin: str, side: str, px: float, sz: float, ts: int) -> None:
         store.add_liquidation(coin, side, px, sz, ts)
+        if on_update is not None:
+            on_update(coin)
 
     await client.connect_liquidations_ws(on_liq, stop_event)
 
@@ -359,6 +378,7 @@ async def poll_hl_ohlcv(
     coins: list[str],
     interval_s: int,
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Poll hourly OHLCV candles from Hyperliquid every interval_s seconds."""
     logger.info("Starting HL OHLCV polling every %ds", interval_s)
@@ -384,6 +404,8 @@ async def poll_hl_ohlcv(
                             timeframe="1h",
                         )
                     logger.debug("HL OHLCV: %d candles for %s", len(candles), coin)
+                    if on_update is not None:
+                        on_update(coin)
             except Exception as exc:
                 logger.error("poll_hl_ohlcv error for %s: %s", coin, exc, exc_info=True)
 
@@ -399,6 +421,7 @@ async def poll_bybit_oi(
     coins: list[str],
     interval_s: int,
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     """
     Poll OI from Bybit every interval_s seconds.
@@ -414,6 +437,8 @@ async def poll_bybit_oi(
                 for r in readings:
                     store.add_oi(coin=coin, oi=r["oi"], ts=r["ts"], source="bybit")
                 logger.debug("Bybit OI: %d readings for %s", len(readings), coin)
+                if readings and on_update is not None:
+                    on_update(coin)
             except Exception as exc:
                 logger.error("poll_bybit_oi error for %s: %s", coin, exc, exc_info=True)
 
@@ -429,6 +454,7 @@ async def poll_bybit_volume(
     coins: list[str],
     interval_s: int,
     stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Poll spot volume from Bybit every interval_s seconds."""
     logger.info("Starting Bybit volume polling every %ds", interval_s)
@@ -447,6 +473,8 @@ async def poll_bybit_volume(
                         source="bybit_spot",
                     )
                 logger.debug("Bybit spot vol: %d entries for %s", len(spot_candles), coin)
+                if spot_candles and on_update is not None:
+                    on_update(coin)
             except Exception as exc:
                 logger.error("poll_bybit_volume error for %s: %s", coin, exc, exc_info=True)
 
@@ -459,6 +487,63 @@ async def poll_bybit_volume(
 # ---------------------------------------------------------------------------
 # Engine tick loop
 # ---------------------------------------------------------------------------
+
+async def process_signal_candidates(
+    engine: SignalEngine,
+    alert_manager: AlertManager,
+    store: SQLiteDataStore,
+    telegram: Optional[TelegramBot],
+    coins: list[str],
+    dry_run: bool,
+    timeframe: str,
+    on_candidate=None,
+) -> None:
+    results = await engine.evaluate_all(coins)
+    candidates = engine.score_confluence(results)
+
+    for candidate in candidates:
+        if not alert_manager.should_fire(candidate):
+            continue
+
+        alert_manager.record_fire(candidate)
+        full_message = alert_manager.format_alert(candidate)
+        send_telegram = alert_manager.should_telegram(candidate)
+
+        print(f"\n{'='*60}\n{full_message}\n{'='*60}\n")
+        logger.info(
+            "Trade candidate: %s %s [%s] %s — %d signals",
+            candidate.coin, candidate.direction, candidate.conviction,
+            candidate.regime, len(candidate.signals),
+        )
+
+        try:
+            store.add_trade_candidate(
+                asset=candidate.coin,
+                direction=candidate.direction,
+                regime=candidate.regime,
+                conviction=candidate.conviction,
+                signal_names=[s.signal_name for s in candidate.signals],
+                price=candidate.vwap_state.get("current_price") if candidate.vwap_state else None,
+                vwap=candidate.vwap_state.get("vwap") if candidate.vwap_state else None,
+                alert_sent=send_telegram and not dry_run,
+            )
+        except Exception as exc:
+            logger.error("Failed to log trade candidate: %s", exc)
+
+        if on_candidate is not None:
+            try:
+                await on_candidate(serialize_candidate(candidate, timeframe))
+            except Exception as exc:
+                logger.error("Failed to broadcast trade candidate: %s", exc)
+
+        if send_telegram:
+            if dry_run:
+                logger.info(
+                    "DRY-RUN: would send Telegram for %s %s [%s]",
+                    candidate.coin, candidate.direction, candidate.conviction,
+                )
+            elif telegram:
+                await telegram.send_alert(full_message, candidate.conviction)
 
 async def engine_tick_loop(
     engine: SignalEngine,
@@ -475,54 +560,16 @@ async def engine_tick_loop(
     logger.info("Starting engine tick loop every %ds", tick_interval_s)
     while not stop_event.is_set():
         try:
-            results = await engine.evaluate_all(coins)
-            candidates = engine.score_confluence(results)
-
-            for candidate in candidates:
-                if not alert_manager.should_fire(candidate):
-                    continue
-
-                alert_manager.record_fire(candidate)
-                full_message = alert_manager.format_alert(candidate)
-                send_telegram = alert_manager.should_telegram(candidate)
-
-                # Always print to terminal
-                print(f"\n{'='*60}\n{full_message}\n{'='*60}\n")
-                logger.info(
-                    "Trade candidate: %s %s [%s] %s — %d signals",
-                    candidate.coin, candidate.direction, candidate.conviction,
-                    candidate.regime, len(candidate.signals),
-                )
-
-                # Log to SQLite
-                try:
-                    store.add_trade_candidate(
-                        asset=candidate.coin,
-                        direction=candidate.direction,
-                        regime=candidate.regime,
-                        conviction=candidate.conviction,
-                        signal_names=[s.signal_name for s in candidate.signals],
-                        price=candidate.vwap_state.get("current_price") if candidate.vwap_state else None,
-                        vwap=candidate.vwap_state.get("vwap") if candidate.vwap_state else None,
-                        alert_sent=send_telegram and not dry_run,
-                    )
-                except Exception as exc:
-                    logger.error("Failed to log trade candidate: %s", exc)
-
-                if on_candidate is not None:
-                    try:
-                        await on_candidate(serialize_candidate(candidate, timeframe))
-                    except Exception as exc:
-                        logger.error("Failed to broadcast trade candidate: %s", exc)
-
-                # Send Telegram for MEDIUM/HIGH
-                if send_telegram:
-                    if dry_run:
-                        logger.info("DRY-RUN: would send Telegram for %s %s [%s]",
-                                    candidate.coin, candidate.direction, candidate.conviction)
-                    elif telegram:
-                        await telegram.send_alert(full_message, candidate.conviction)
-
+            await process_signal_candidates(
+                engine=engine,
+                alert_manager=alert_manager,
+                store=store,
+                telegram=telegram,
+                coins=coins,
+                dry_run=dry_run,
+                timeframe=timeframe,
+                on_candidate=on_candidate,
+            )
         except Exception as exc:
             logger.error("engine_tick_loop error: %s", exc, exc_info=True)
 
@@ -530,6 +577,63 @@ async def engine_tick_loop(
             await asyncio.wait_for(stop_event.wait(), timeout=tick_interval_s)
         except asyncio.TimeoutError:
             pass
+
+
+async def signal_refresh_loop(
+    engine: SignalEngine,
+    alert_manager: AlertManager,
+    store: SQLiteDataStore,
+    telegram: Optional[TelegramBot],
+    refresh_queue: asyncio.Queue[str],
+    debounce_seconds: float,
+    stop_event: asyncio.Event,
+    dry_run: bool,
+    timeframe: str,
+    on_candidate=None,
+) -> None:
+    """
+    Debounced refresh loop for websocket-fed updates.
+
+    Signals triggered by live trades, liquidations, or orderbook changes should
+    not wait for the hourly engine tick. This loop coalesces bursts of updates
+    and evaluates only the impacted coins.
+    """
+    pending: set[str] = set()
+    logger.info("Starting debounced signal refresh loop (debounce=%.1fs)", debounce_seconds)
+
+    while not stop_event.is_set():
+        try:
+            coin = await asyncio.wait_for(refresh_queue.get(), timeout=0.5)
+            pending.add(coin)
+            deadline = time.monotonic() + debounce_seconds
+            while not stop_event.is_set():
+                timeout = deadline - time.monotonic()
+                if timeout <= 0:
+                    break
+                try:
+                    coin = await asyncio.wait_for(refresh_queue.get(), timeout=timeout)
+                    pending.add(coin)
+                except asyncio.TimeoutError:
+                    break
+
+            if pending:
+                try:
+                    await process_signal_candidates(
+                        engine=engine,
+                        alert_manager=alert_manager,
+                        store=store,
+                        telegram=telegram,
+                        coins=sorted(pending),
+                        dry_run=dry_run,
+                        timeframe=timeframe,
+                        on_candidate=on_candidate,
+                    )
+                except Exception as exc:
+                    logger.error("signal_refresh_loop error: %s", exc, exc_info=True)
+                finally:
+                    pending.clear()
+        except asyncio.TimeoutError:
+            continue
 
 
 # ---------------------------------------------------------------------------
@@ -716,6 +820,9 @@ async def main(args: argparse.Namespace) -> None:
     logger.info("Daemon online — assets=%s signals=%s db=%s", coins, enabled_signals, db_path)
 
     stop_event = asyncio.Event()
+    signal_refresh_queue: Optional[asyncio.Queue[str]] = None
+    if runtime_settings["signal_refresh_enabled"]:
+        signal_refresh_queue = asyncio.Queue(maxsize=1000)
 
     def _handle_shutdown(sig: int, frame) -> None:
         logger.info("Received signal %s — initiating graceful shutdown", sig)
@@ -724,18 +831,41 @@ async def main(args: argparse.Namespace) -> None:
     signal.signal(signal.SIGINT, _handle_shutdown)
     signal.signal(signal.SIGTERM, _handle_shutdown)
 
+    def _enqueue_signal_refresh(coin: str) -> None:
+        if signal_refresh_queue is None:
+            return
+        try:
+            signal_refresh_queue.put_nowait(coin)
+        except asyncio.QueueFull:
+            logger.debug("Signal refresh queue full; dropping update for %s", coin)
+
     tasks = [
         # HL data
         asyncio.create_task(
-            poll_asset_contexts(hl_client, store, coins, context_poll_s, stop_event),
+            poll_asset_contexts(
+                hl_client,
+                store,
+                coins,
+                context_poll_s,
+                stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="poll_hl_context",
         ),
         asyncio.create_task(
-            poll_funding_history(hl_client, store, coins, funding_poll_s, lookback_hours, stop_event),
+            poll_funding_history(
+                hl_client,
+                store,
+                coins,
+                funding_poll_s,
+                lookback_hours,
+                stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="poll_hl_funding",
         ),
         asyncio.create_task(
-            run_trades_ws(hl_client, store, coins, stop_event),
+            run_trades_ws(hl_client, store, coins, stop_event, on_update=_enqueue_signal_refresh if signal_refresh_queue else None),
             name="ws_trades",
         ),
         asyncio.create_task(
@@ -746,24 +876,46 @@ async def main(args: argparse.Namespace) -> None:
                 stop_event,
                 snapshot_interval_s=orderbook_snapshot_s,
                 depth_levels=orderbook_depth_levels,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
             ),
             name="ws_l2book",
         ),
         asyncio.create_task(
-            run_liquidations_ws(hl_client, store, stop_event),
+            run_liquidations_ws(hl_client, store, stop_event, on_update=_enqueue_signal_refresh if signal_refresh_queue else None),
             name="ws_liquidations",
         ),
         # Bybit REST pollers
         asyncio.create_task(
-            poll_hl_ohlcv(hl_client, store, coins, bybit_ohlcv_s, stop_event),
+            poll_hl_ohlcv(
+                hl_client,
+                store,
+                coins,
+                bybit_ohlcv_s,
+                stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="poll_hl_ohlcv",
         ),
         asyncio.create_task(
-            poll_bybit_oi(bybit_client, store, coins, bybit_oi_s, stop_event),
+            poll_bybit_oi(
+                bybit_client,
+                store,
+                coins,
+                bybit_oi_s,
+                stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="poll_bybit_oi",
         ),
         asyncio.create_task(
-            poll_bybit_volume(bybit_client, store, coins, bybit_vol_s, stop_event),
+            poll_bybit_volume(
+                bybit_client,
+                store,
+                coins,
+                bybit_vol_s,
+                stop_event,
+                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
+            ),
             name="poll_bybit_volume",
         ),
         # Engine
@@ -780,6 +932,27 @@ async def main(args: argparse.Namespace) -> None:
                 runtime_settings["timeframe"],
             ),
             name="engine_tick",
+        ),
+        *(
+            [
+                asyncio.create_task(
+                    signal_refresh_loop(
+                        engine,
+                        alert_manager,
+                        store,
+                        telegram,
+                        signal_refresh_queue,
+                        runtime_settings["signal_refresh_debounce_seconds"],
+                        stop_event,
+                        dry_run,
+                        runtime_settings["timeframe"],
+                        on_candidate=None,
+                    ),
+                    name="signal_refresh",
+                )
+            ]
+            if signal_refresh_queue is not None
+            else []
         ),
         # Diagnostics
         asyncio.create_task(

@@ -29,6 +29,8 @@ alerts:
 
 engine:
   tick_interval_seconds: 3600
+  signal_refresh_enabled: true
+  signal_refresh_debounce_seconds: 2.0
 
 confluence:
   thresholds:

@@ -15,13 +15,52 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 from data.store import DataStore
 from signals.base import BaseSignal, SignalResult
 from signals import SIGNAL_REGISTRY
 
 logger = logging.getLogger(__name__)
+
+
+_CACHED_STORE_METHODS = {
+    "get_funding_window",
+    "get_snapshots_window",
+    "get_volume_summary",
+    "get_oi_change",
+    "get_trades_window",
+    "get_trade_ticks",
+    "get_liquidations_window",
+    "get_liquidation_summary",
+    "get_orderbook_imbalance_window",
+    "get_ohlcv_window",
+    "get_latest_ohlcv",
+    "get_session_vwap",
+    "get_vwap_std",
+    "get_spot_volume_rolling_avg",
+}
+
+
+class _CoinStoreCacheProxy:
+    """Caches repeated store reads within a single coin evaluation pass."""
+
+    def __init__(self, store: DataStore) -> None:
+        self._store = store
+        self._cache: dict[tuple[str, tuple[Any, ...], tuple[tuple[str, Any], ...]], Any] = {}
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._store, name)
+        if name not in _CACHED_STORE_METHODS or not callable(attr):
+            return attr
+
+        def cached(*args: Any, **kwargs: Any) -> Any:
+            key = (name, args, tuple(sorted(kwargs.items())))
+            if key not in self._cache:
+                self._cache[key] = attr(*args, **kwargs)
+            return self._cache[key]
+
+        return cached
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +102,7 @@ _REGIMES = [
     ("Book Pressure",     {"orderbook_imbalance", "funding_extremes"},      "aligned", "HIGH"),
     ("Leveraged Squeeze", {"funding_extremes", "oi_volume_divergence"}, "aligned", "HIGH"),
     ("Organic Trend",     {"spot_led_flow", "vwap_deviation"},          "aligned", "HIGH"),
-    ("Organic Trend",     {"spot_led_flow"},                             "aligned", "HIGH"),   # standalone spot flow still HIGH in context
+    ("Organic Trend",     {"spot_led_flow"},                             "aligned", "HIGH"),
     ("Forced Deleveraging", {"leverage_flush"},                          "aligned", "MEDIUM"),
     ("Aggressive Flow",   {"trade_flow_imbalance"},                      "aligned", "MEDIUM"),
     ("Mean Reversion",    {"funding_extremes", "vwap_deviation"},        "aligned", "MEDIUM"),
@@ -152,8 +191,11 @@ class SignalEngine:
         Returns list of non-None results.
         """
         results: list[SignalResult] = []
-        for signal in self._signals:
-            for coin in coins:
+        for coin in coins:
+            cached_store = _CoinStoreCacheProxy(self.store)
+            for signal in self._signals:
+                original_store = signal.store
+                signal.store = cached_store
                 try:
                     result = signal.evaluate(coin)
                     if result is not None:
@@ -169,6 +211,8 @@ class SignalEngine:
                         "Signal %s crashed for %s: %s",
                         signal.name, coin, exc, exc_info=True,
                     )
+                finally:
+                    signal.store = original_store
         return results
 
     def score_confluence(self, results: list[SignalResult]) -> list[TradeCandidate]:

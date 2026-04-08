@@ -38,26 +38,17 @@ class SpotLedFlowSignal(BaseSignal):
         lookback_ms = int(lookback_hours * 3600 * 1000)
         short_ms = int(lookback_ms / 4)  # current window ≈ 6h
 
-        # --- Volume: current vs rolling avg ---
+        # Spot-led flow is only valid if the runtime has explicit spot volume.
         cur_vol = self.store.get_volume_summary(coin, short_ms)
-        avg_vol_per_bucket = self.store.get_spot_volume_rolling_avg(coin, lookback_ms)
+        current_spot_volume = float(cur_vol.get("spot_volume", 0.0) or 0.0)
+        rolling_avg = float(self.store.get_spot_volume_rolling_avg(coin, lookback_ms) or 0.0)
 
-        # For stores that don't have get_spot_volume_rolling_avg (in-memory store),
-        # fall back to total_volume ratio
-        if hasattr(self.store, 'get_spot_volume_rolling_avg'):
-            rolling_avg = avg_vol_per_bucket
-        else:
-            prior_vol = self.store.get_volume_summary(coin, lookback_ms)
-            rolling_avg = prior_vol["total_volume"] / max(lookback_hours, 1)
-
-        # Estimate current hourly volume
-        current_hourly = (cur_vol["spot_volume"] or cur_vol["total_volume"])
-        if current_hourly == 0 or rolling_avg == 0:
+        if current_spot_volume <= 0 or rolling_avg <= 0:
             self._consecutive[coin] = 0
-            self.logger.debug("%s: no volume data for spot-led check", coin)
+            self.logger.debug("%s: no reliable spot volume data for spot-led check", coin)
             return None
 
-        vol_surge_pct = ((current_hourly - rolling_avg) / rolling_avg) * 100
+        vol_surge_pct = ((current_spot_volume - rolling_avg) / rolling_avg) * 100
 
         # --- OI: check flatness ---
         oi_data = self.store.get_oi_change(coin, short_ms)
@@ -137,5 +128,7 @@ class SpotLedFlowSignal(BaseSignal):
                 "price_up": price_up,
                 "consecutive_confirmations": self._consecutive[coin],
                 "sub_signal": "spot_led_flow",
+                "spot_volume": current_spot_volume,
+                "spot_volume_rolling_avg": rolling_avg,
             },
         )

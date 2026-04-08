@@ -428,6 +428,24 @@ class SQLiteDataStore:
         CVD-style signals will use these buckets.
         """
         cutoff = int(time.time() * 1000) - lookback_ms
+        tick_rows = self._q(
+            """SELECT ts, side, px, sz, notional
+               FROM trade_ticks WHERE asset=? AND ts>=? ORDER BY ts ASC""",
+            (coin, cutoff),
+        )
+        if tick_rows:
+            return [
+                {
+                    "side": row["side"],
+                    "px": row["px"],
+                    "sz": row["sz"],
+                    "time": row["ts"],
+                    "ts": row["ts"],
+                    "notional": row["notional"],
+                }
+                for row in tick_rows
+            ]
+
         rows = self._q(
             """SELECT ts, buy_volume, sell_volume, futures_volume
                FROM volume_snapshots WHERE asset=? AND ts>=? ORDER BY ts ASC""",
@@ -437,11 +455,11 @@ class SQLiteDataStore:
         for r in rows:
             total = (r["buy_volume"] or 0.0) + (r["sell_volume"] or 0.0)
             if total > 0:
-                # Reconstruct pseudo-trades: one buy bucket, one sell bucket
+                # Preserve backward compatibility when only aggregated volume exists.
                 if r["buy_volume"]:
-                    result.append({"side": "B", "px": 1.0, "sz": r["buy_volume"], "time": r["ts"]})
+                    result.append({"side": "B", "px": 1.0, "sz": r["buy_volume"], "time": r["ts"], "ts": r["ts"]})
                 if r["sell_volume"]:
-                    result.append({"side": "S", "px": 1.0, "sz": r["sell_volume"], "time": r["ts"]})
+                    result.append({"side": "S", "px": 1.0, "sz": r["sell_volume"], "time": r["ts"], "ts": r["ts"]})
         return result
 
     def get_trade_ticks(self, coin: str, lookback_ms: int) -> list[dict]:
@@ -576,11 +594,17 @@ class SQLiteDataStore:
     # ------------------------------------------------------------------
 
     def get_spot_volume_rolling_avg(self, asset: str, lookback_ms: int) -> float:
-        """Average per-bucket spot_volume (from Bybit kline volume) over lookback."""
+        """
+        Average spot volume over the lookback window.
+
+        Only rows with explicit spot volume are included. Futures-only buckets
+        are ignored so the result cannot be polluted by non-spot flow.
+        """
         cutoff = int(time.time() * 1000) - lookback_ms
         row = self._q1(
-            """SELECT AVG(futures_volume) AS avg_vol, COUNT(*) AS cnt
-               FROM volume_snapshots WHERE asset=? AND ts>=?""",
+            """SELECT AVG(spot_volume) AS avg_vol, COUNT(*) AS cnt
+               FROM volume_snapshots
+               WHERE asset=? AND ts>=? AND spot_volume > 0""",
             (asset, cutoff),
         )
         if not row or row["avg_vol"] is None:
