@@ -1,0 +1,11 @@
+enabled: true
+lookback_minutes: 60
+min_liquidation_events: 6
+oi_drop_threshold_pct: 3.0
+price_displacement_threshold_pct: 0.75
+liquidation_share_threshold: 0.6
+decline_confirmation_ratio: 0.8
+thresholds:
+  low: 1.0
+  medium: 1.5
+  high: 2.0

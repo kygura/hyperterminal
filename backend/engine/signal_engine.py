@@ -55,11 +55,22 @@ Alert = TradeCandidate
 _REGIMES = [
     # (regime_name, required_modules_set, direction_mode, conviction)
     # direction_mode: "fade" = opposite of crowd, "follow" = follow signal direction
+    ("Leverage Flush",    {"leverage_flush", "liquidation_cascade"},   "aligned", "HIGH"),
+    ("Liquidation Cascade", {"liquidation_cascade", "funding_velocity"}, "aligned", "HIGH"),
+    ("Funding Acceleration", {"funding_velocity", "funding_extremes"},   "aligned", "HIGH"),
+    ("Cascade Squeeze",   {"liquidation_cascade", "orderbook_imbalance"}, "aligned", "HIGH"),
+    ("Orderflow Squeeze", {"orderbook_imbalance", "trade_flow_imbalance"}, "aligned", "HIGH"),
+    ("Book Pressure",     {"orderbook_imbalance", "funding_extremes"},      "aligned", "HIGH"),
     ("Leveraged Squeeze", {"funding_extremes", "oi_volume_divergence"}, "aligned", "HIGH"),
     ("Organic Trend",     {"spot_led_flow", "vwap_deviation"},          "aligned", "HIGH"),
     ("Organic Trend",     {"spot_led_flow"},                             "aligned", "HIGH"),   # standalone spot flow still HIGH in context
+    ("Forced Deleveraging", {"leverage_flush"},                          "aligned", "MEDIUM"),
+    ("Aggressive Flow",   {"trade_flow_imbalance"},                      "aligned", "MEDIUM"),
     ("Mean Reversion",    {"funding_extremes", "vwap_deviation"},        "aligned", "MEDIUM"),
     ("Leverage Unwind",   {"oi_volume_divergence", "vwap_deviation"},    "aligned", "MEDIUM"),
+    ("Liq Cascade",       {"liquidation_cascade"},                       "aligned", "LOW"),
+    ("Funding Momentum",  {"funding_velocity"},                          "aligned", "LOW"),
+    ("Book Imbalance",    {"orderbook_imbalance"},                       "aligned", "LOW"),
     ("Spot Absorption",   {"spot_led_flow"},                             "aligned", "LOW"),
     ("Funding Fade",      {"funding_extremes"},                          "aligned", "LOW"),
     ("OI Divergence",     {"oi_volume_divergence"},                      "aligned", "LOW"),
@@ -72,9 +83,14 @@ _SIGNAL_PRIORITY: dict[str, int] = {
     "premium_extremes":    0,
     "cvd_divergence":      1,
     "vwap_deviation":      2,
-    "funding_extremes":    3,
-    "oi_volume_divergence":4,
-    "spot_led_flow":       5,
+    "orderbook_imbalance": 3,
+    "funding_extremes":    4,
+    "funding_velocity":    5,
+    "trade_flow_imbalance": 6,
+    "liquidation_cascade": 7,
+    "oi_volume_divergence": 8,
+    "leverage_flush":      9,
+    "spot_led_flow":       10,
 }
 
 # Signals that are modifier-only (never trigger a candidate alone unless paired)
@@ -121,6 +137,7 @@ class SignalEngine:
                 logger.info("Signal %s is disabled, skipping", stem)
                 continue
             instance = cls(name=stem, config=config, store=self.store)
+            instance.global_config = self.global_config
             self._signals.append(instance)
             if stem == "vwap_deviation":
                 self._vwap_signal = instance

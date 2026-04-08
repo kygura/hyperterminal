@@ -29,13 +29,16 @@ from engine.watcher import watcher
 from main_daemon import (
     engine_tick_loop,
     load_global_config,
+    load_signal_config,
     log_data_counts,
     poll_asset_contexts,
     poll_bybit_oi,
     poll_bybit_volume,
     poll_funding_history,
     poll_hl_ohlcv,
+    prune_ticks_loop,
     resolve_runtime_settings,
+    run_l2book_ws,
     run_liquidations_ws,
     run_trades_ws,
     validate_config,
@@ -185,11 +188,16 @@ async def start_signal_runtime() -> None:
     )
     validate_config(global_config, dry_run=not telegram_enabled)
     runtime = resolve_runtime_settings(global_config)
+    orderbook_config = load_signal_config(str(BACKEND_ROOT / "config"), "orderbook_imbalance")
+    trade_flow_config = load_signal_config(str(BACKEND_ROOT / "config"), "trade_flow_imbalance")
 
     coins: list[str] = global_config["assets"]
     lookback_hours = 48
     health_s = int(global_config.get("health_check", {}).get("interval_seconds", 21600))
     db_path = str(BACKEND_ROOT / global_config.get("database", {}).get("path", "data.db"))
+    orderbook_snapshot_s = int(orderbook_config.get("snapshot_interval_seconds", 30))
+    orderbook_depth_levels = int(orderbook_config.get("depth_levels", 10))
+    orderflow_retention_hours = int(trade_flow_config.get("retention_hours", 48))
 
     signal_hl_client = HLClient()
     signal_bybit_client = BybitClient(
@@ -251,6 +259,17 @@ async def start_signal_runtime() -> None:
         asyncio.create_task(
             run_trades_ws(signal_hl_client, signal_store, coins, signal_stop_event),
             name="signal_ws_trades",
+        ),
+        asyncio.create_task(
+            run_l2book_ws(
+                signal_hl_client,
+                signal_store,
+                coins,
+                signal_stop_event,
+                snapshot_interval_s=orderbook_snapshot_s,
+                depth_levels=orderbook_depth_levels,
+            ),
+            name="signal_ws_l2book",
         ),
         asyncio.create_task(
             run_liquidations_ws(signal_hl_client, signal_store, signal_stop_event),
@@ -316,6 +335,10 @@ async def start_signal_runtime() -> None:
                 not telegram_enabled,
             ),
             name="signal_health_check",
+        ),
+        asyncio.create_task(
+            prune_ticks_loop(signal_store, orderflow_retention_hours, 3600, signal_stop_event),
+            name="signal_prune_orderflow_ticks",
         ),
     ]
 

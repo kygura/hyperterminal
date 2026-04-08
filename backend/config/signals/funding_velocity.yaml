@@ -1,0 +1,11 @@
+enabled: true
+lookback_hours: 24
+min_samples: 8
+velocity_window: 3
+velocity_threshold: 0.00002
+acceleration_threshold: 0.00001
+price_divergence_threshold_pct: 0.25
+thresholds:
+  low: 1.0
+  medium: 1.5
+  high: 2.0

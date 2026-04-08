@@ -32,7 +32,12 @@ _CONVICTION_EMOJI = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
 # All signal slots for the "Signals:" block in v2 format
 _SIGNAL_DISPLAY_ORDER = [
     ("funding_extremes",     "Funding Rate"),
+    ("funding_velocity",     "Funding Vel"),
+    ("liquidation_cascade",  "Liq Cascade"),
+    ("leverage_flush",       "Lev Flush"),
+    ("orderbook_imbalance",  "Book Imb"),
     ("oi_volume_divergence", "OI/Vol Div"),
+    ("trade_flow_imbalance", "Trade Flow"),
     ("spot_led_flow",        "Spot Flow"),
     ("vwap_deviation",       "VWAP"),
     ("cvd_divergence",       "CVD"),
@@ -207,10 +212,41 @@ def _signal_detail(name: str, sig: SignalResult) -> str:
         ext = "extreme long" if z > 0 else "extreme short"
         return f"{z:+.1f}σ ({rate_pct:.4f}% — {ext})"
 
+    elif name == "funding_velocity":
+        velocity = meta.get("recent_velocity", 0.0)
+        acceleration = meta.get("acceleration", 0.0)
+        return f"vel {velocity:+.5f}, accel {acceleration:+.5f}"
+
+    elif name == "liquidation_cascade":
+        sub_signal = meta.get("sub_signal", "cascade")
+        z = meta.get("intensity_z_score", meta.get("peak_z_score", 0.0))
+        return f"{sub_signal}: {z:+.2f}σ"
+
+    elif name == "leverage_flush":
+        oi = meta.get("oi_pct_change", 0.0)
+        price = meta.get("price_pct_change", 0.0)
+        return f"{meta.get('sub_signal', 'flush')}: OI {oi:+.1f}%, Px {price:+.1f}%"
+
+    elif name == "orderbook_imbalance":
+        ratio = meta.get("imbalance_ratio", 0.0)
+        persistence = meta.get("persistence_count", 0)
+        spread = meta.get("spread", 0.0)
+        return f"Ratio {ratio:.2f}, spread {spread:.2f}, persistence {persistence}"
+
     elif name == "oi_volume_divergence":
         oi = meta.get("oi_pct", 0.0)
         vol = meta.get("vol_pct_change", 0.0)
         return f"OI {oi:+.1f}%, Vol {vol:+.0f}%"
+
+    elif name == "trade_flow_imbalance":
+        sub_signal = meta.get("sub_signal", "flow")
+        delta_ratio = meta.get("delta_ratio")
+        whale_ratio = meta.get("whale_ratio")
+        if delta_ratio is not None:
+            return f"{sub_signal}: delta {delta_ratio:+.2f}"
+        if whale_ratio is not None:
+            return f"{sub_signal}: skew {whale_ratio:.2f}"
+        return sub_signal
 
     elif name == "spot_led_flow":
         surge = meta.get("vol_surge_pct", 0.0)

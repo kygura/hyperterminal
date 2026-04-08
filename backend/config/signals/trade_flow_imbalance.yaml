@@ -1,0 +1,14 @@
+enabled: true
+lookback_minutes: 60
+daily_lookback_minutes: 1440
+min_trades: 200
+daily_min_trades: 800
+delta_z_threshold: 1.5
+whale_threshold_usd: 50000
+whale_skew_threshold: 0.65
+absorption_price_tolerance_pct: 0.1
+retention_hours: 48
+thresholds:
+  low: 1.0
+  medium: 1.5
+  high: 2.0

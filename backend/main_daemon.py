@@ -111,6 +111,14 @@ def load_global_config(path: str) -> dict:
         return yaml.safe_load(f) or {}
 
 
+def load_signal_config(config_dir: str, signal_name: str) -> dict:
+    path = os.path.join(config_dir, "signals", f"{signal_name}.yaml")
+    if not os.path.exists(path):
+        return {}
+    with open(path, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
 def validate_config(global_config: dict, dry_run: bool) -> None:
     errors: list[str] = []
 
@@ -283,6 +291,32 @@ async def run_trades_ws(
     await client.connect_trades_ws(coins, on_trade, stop_event)
 
 
+async def run_l2book_ws(
+    client: HLClient,
+    store: SQLiteDataStore,
+    coins: list[str],
+    stop_event: asyncio.Event,
+    snapshot_interval_s: int = 30,
+    depth_levels: int = 10,
+) -> None:
+    last_persisted: dict[str, int] = {}
+
+    def on_book(coin: str, bids: list[dict], asks: list[dict], ts: int) -> None:
+        min_delta_ms = max(snapshot_interval_s, 1) * 1000
+        if ts - last_persisted.get(coin, 0) < min_delta_ms:
+            return
+        store.add_orderbook_snapshot(
+            coin=coin,
+            ts=ts,
+            bids=bids,
+            asks=asks,
+            depth_levels=depth_levels,
+        )
+        last_persisted[coin] = ts
+
+    await client.connect_l2book_ws(coins, on_book, stop_event)
+
+
 async def run_liquidations_ws(
     client: HLClient,
     store: SQLiteDataStore,
@@ -292,6 +326,27 @@ async def run_liquidations_ws(
         store.add_liquidation(coin, side, px, sz, ts)
 
     await client.connect_liquidations_ws(on_liq, stop_event)
+
+
+async def prune_ticks_loop(
+    store: SQLiteDataStore,
+    retention_hours: int,
+    interval_s: int,
+    stop_event: asyncio.Event,
+) -> None:
+    retention_ms = retention_hours * 3600 * 1000
+    while not stop_event.is_set():
+        try:
+            deleted = store.prune_old_ticks(retention_ms)
+            if any(deleted.values()):
+                logger.info("Pruned orderflow data: %s", deleted)
+        except Exception as exc:
+            logger.error("prune_ticks_loop error: %s", exc, exc_info=True)
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
+        except asyncio.TimeoutError:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -608,6 +663,8 @@ async def main(args: argparse.Namespace) -> None:
 
     global_config = load_global_config(os.path.join("config", "global.yaml"))
     validate_config(global_config, dry_run)
+    orderbook_config = load_signal_config("config", "orderbook_imbalance")
+    trade_flow_config = load_signal_config("config", "trade_flow_imbalance")
 
     coins: list[str] = global_config["assets"]
     runtime_settings = resolve_runtime_settings(global_config)
@@ -620,6 +677,9 @@ async def main(args: argparse.Namespace) -> None:
     cooldown_s = runtime_settings["cooldown_seconds"]
     health_s: int = global_config.get("health_check", {}).get("interval_seconds", 21600)
     lookback_hours: int = 48
+    orderbook_snapshot_s = int(orderbook_config.get("snapshot_interval_seconds", 30))
+    orderbook_depth_levels = int(orderbook_config.get("depth_levels", 10))
+    orderflow_retention_hours = int(trade_flow_config.get("retention_hours", 48))
 
     db_path = global_config.get("database", {}).get("path", "data.db")
 
@@ -679,6 +739,17 @@ async def main(args: argparse.Namespace) -> None:
             name="ws_trades",
         ),
         asyncio.create_task(
+            run_l2book_ws(
+                hl_client,
+                store,
+                coins,
+                stop_event,
+                snapshot_interval_s=orderbook_snapshot_s,
+                depth_levels=orderbook_depth_levels,
+            ),
+            name="ws_l2book",
+        ),
+        asyncio.create_task(
             run_liquidations_ws(hl_client, store, stop_event),
             name="ws_liquidations",
         ),
@@ -718,6 +789,10 @@ async def main(args: argparse.Namespace) -> None:
         asyncio.create_task(
             health_check_loop(telegram, alert_manager, store, health_s, start_time, stop_event, dry_run),
             name="health_check",
+        ),
+        asyncio.create_task(
+            prune_ticks_loop(store, orderflow_retention_hours, 3600, stop_event),
+            name="prune_orderflow_ticks",
         ),
     ]
 

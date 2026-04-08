@@ -327,3 +327,46 @@ class HLClient:
                 logger.debug("HLClient: liquidation parse error: %s", exc)
 
         await self._ws_connect_with_backoff("liquidations", subscribe_msgs, handler, stop_event)
+
+    async def connect_l2book_ws(
+        self,
+        coins: list[str],
+        callback: Callable[[str, list[dict], list[dict], int], None],
+        stop_event: asyncio.Event,
+    ) -> None:
+        """
+        Subscribe to L2 book channel for given coins.
+        Calls callback(coin, bids, asks, time) for each snapshot update.
+        """
+        subscribe_msgs = [
+            {"method": "subscribe", "subscription": {"type": "l2Book", "coin": coin}}
+            for coin in coins
+        ]
+
+        def handler(msg: dict) -> None:
+            channel = msg.get("channel")
+            data = msg.get("data")
+            if channel != "l2Book" or not isinstance(data, dict):
+                return
+            levels = data.get("levels")
+            if not isinstance(levels, list) or len(levels) != 2:
+                return
+            bids, asks = levels
+            if not isinstance(bids, list) or not isinstance(asks, list):
+                return
+            try:
+                coin = data.get("coin", "")
+                ts = int(data.get("time", 0))
+                if coin and ts > 0:
+                    callback(coin, bids, asks, ts)
+                    logger.debug(
+                        "L2 book: %s bids=%d asks=%d ts=%d",
+                        coin,
+                        len(bids),
+                        len(asks),
+                        ts,
+                    )
+            except (TypeError, ValueError, KeyError) as exc:
+                logger.debug("HLClient: l2Book parse error: %s", exc)
+
+        await self._ws_connect_with_backoff("l2Book", subscribe_msgs, handler, stop_event)

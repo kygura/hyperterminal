@@ -47,6 +47,31 @@ CREATE TABLE IF NOT EXISTS volume_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_vol_asset_ts ON volume_snapshots(asset, ts DESC);
 
+CREATE TABLE IF NOT EXISTS trade_ticks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          INTEGER NOT NULL,
+    asset       TEXT    NOT NULL,
+    side        TEXT    NOT NULL,
+    px          REAL    NOT NULL,
+    sz          REAL    NOT NULL,
+    notional    REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_trade_ticks_asset_ts ON trade_ticks(asset, ts DESC);
+
+CREATE TABLE IF NOT EXISTS orderbook_snapshots (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              INTEGER NOT NULL,
+    asset           TEXT    NOT NULL,
+    bid_depth_json  TEXT    NOT NULL,
+    ask_depth_json  TEXT    NOT NULL,
+    bid_total       REAL    NOT NULL,
+    ask_total       REAL    NOT NULL,
+    imbalance_ratio REAL    NOT NULL,
+    spread          REAL    NOT NULL,
+    mid_px          REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_orderbook_asset_ts ON orderbook_snapshots(asset, ts DESC);
+
 CREATE TABLE IF NOT EXISTS ohlcv (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     ts          INTEGER NOT NULL,       -- candle open time (epoch ms)
@@ -76,6 +101,17 @@ CREATE TABLE IF NOT EXISTS asset_snapshots (
     premium     REAL
 );
 CREATE INDEX IF NOT EXISTS idx_snap_asset_ts ON asset_snapshots(asset, ts DESC);
+
+CREATE TABLE IF NOT EXISTS liquidations (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       INTEGER NOT NULL,
+    asset    TEXT    NOT NULL,
+    side     TEXT    NOT NULL,       -- 'B' (long liq) or 'S' (short liq)
+    px       REAL    NOT NULL,
+    sz       REAL    NOT NULL,
+    notional REAL    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_liq_asset_ts ON liquidations(asset, ts DESC);
 
 CREATE TABLE IF NOT EXISTS trade_candidates (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,0 +1,14 @@
+enabled: true
+depth_levels: 10
+snapshot_interval_seconds: 30
+lookback_minutes: 60
+daily_lookback_minutes: 1440
+min_snapshots: 20
+daily_min_snapshots: 60
+imbalance_threshold: 0.15
+persistence_count: 5
+daily_persistence_count: 12
+thresholds:
+  low: 1.0
+  medium: 1.5
+  high: 2.0

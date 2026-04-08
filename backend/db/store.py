@@ -148,6 +148,7 @@ class SQLiteDataStore:
         if not all(_is_valid_number(v) for v in (px, sz, ts)):
             return
         notional = float(px) * float(sz)
+        self.add_trade_tick(coin, side, px, sz, ts)
         buy_vol = notional if side == "B" else 0.0
         sell_vol = notional if side != "B" else 0.0
         # Aggregate into 1-minute buckets
@@ -167,13 +168,71 @@ class SQLiteDataStore:
             (buy_vol, sell_vol, notional, bucket_ms, coin, "hyperliquid_ws"),
         )
 
+    def add_trade_tick(self, coin: str, side: str, px: float, sz: float, ts: int) -> None:
+        if not all(_is_valid_number(v) for v in (px, sz, ts)):
+            return
+        self._exec(
+            """INSERT INTO trade_ticks(ts, asset, side, px, sz, notional)
+               VALUES(?,?,?,?,?,?)""",
+            (int(ts), coin, side, float(px), float(sz), float(px) * float(sz)),
+        )
+
     # ------------------------------------------------------------------
     # Write: liquidations (from HL WebSocket)
     # ------------------------------------------------------------------
 
     def add_liquidation(self, coin: str, side: str, px: float, sz: float, ts: int) -> None:
-        # Liquidations not stored in v2 schema yet — log only
-        logger.debug("Liquidation: %s %s px=%.4f sz=%.4f ts=%d", coin, side, px, sz, ts)
+        if not all(_is_valid_number(v) for v in (px, sz, ts)):
+            return
+        self._exec(
+            """INSERT INTO liquidations(ts, asset, side, px, sz, notional)
+               VALUES(?,?,?,?,?,?)""",
+            (int(ts), coin, side, float(px), float(sz), float(px) * float(sz)),
+        )
+
+    def add_orderbook_snapshot(
+        self,
+        coin: str,
+        ts: int,
+        bids: list[dict],
+        asks: list[dict],
+        depth_levels: int = 10,
+    ) -> None:
+        if not _is_valid_number(ts):
+            return
+        bid_levels = self._normalize_book_levels(bids, depth_levels)
+        ask_levels = self._normalize_book_levels(asks, depth_levels)
+        if not bid_levels or not ask_levels:
+            return
+
+        best_bid = bid_levels[0]["px"]
+        best_ask = ask_levels[0]["px"]
+        if best_ask <= 0 or best_bid <= 0 or best_ask < best_bid:
+            return
+
+        bid_total = sum(level["sz"] for level in bid_levels)
+        ask_total = sum(level["sz"] for level in ask_levels)
+        total_depth = bid_total + ask_total
+        if total_depth <= 0:
+            return
+
+        self._exec(
+            """INSERT INTO orderbook_snapshots(
+                   ts, asset, bid_depth_json, ask_depth_json, bid_total, ask_total,
+                   imbalance_ratio, spread, mid_px
+               ) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (
+                int(ts),
+                coin,
+                json.dumps(bid_levels),
+                json.dumps(ask_levels),
+                bid_total,
+                ask_total,
+                bid_total / total_depth,
+                best_ask - best_bid,
+                (best_ask + best_bid) / 2.0,
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Write: OHLCV (from Bybit REST)
@@ -385,12 +444,77 @@ class SQLiteDataStore:
                     result.append({"side": "S", "px": 1.0, "sz": r["sell_volume"], "time": r["ts"]})
         return result
 
+    def get_trade_ticks(self, coin: str, lookback_ms: int) -> list[dict]:
+        cutoff = int(time.time() * 1000) - lookback_ms
+        rows = self._q(
+            """SELECT ts, side, px, sz, notional
+               FROM trade_ticks WHERE asset=? AND ts>=? ORDER BY ts ASC""",
+            (coin, cutoff),
+        )
+        return [dict(r) for r in rows]
+
     # ------------------------------------------------------------------
     # Read: liquidations window (mirrors original DataStore interface)
     # ------------------------------------------------------------------
 
     def get_liquidations_window(self, coin: Optional[str], lookback_ms: int) -> list[dict]:
-        return []  # Not stored in v2 schema
+        cutoff = int(time.time() * 1000) - lookback_ms
+        if coin:
+            rows = self._q(
+                """SELECT ts, asset, side, px, sz, notional
+                   FROM liquidations WHERE asset=? AND ts>=? ORDER BY ts ASC""",
+                (coin, cutoff),
+            )
+        else:
+            rows = self._q(
+                """SELECT ts, asset, side, px, sz, notional
+                   FROM liquidations WHERE ts>=? ORDER BY ts ASC""",
+                (cutoff,),
+            )
+        return [dict(r) for r in rows]
+
+    def get_liquidation_summary(self, coin: str, lookback_ms: int) -> dict:
+        cutoff = int(time.time() * 1000) - lookback_ms
+        row = self._q1(
+            """SELECT
+                 SUM(CASE WHEN side='B' THEN notional ELSE 0 END) AS long_notional,
+                 SUM(CASE WHEN side='S' THEN notional ELSE 0 END) AS short_notional,
+                 SUM(CASE WHEN side='B' THEN 1 ELSE 0 END) AS long_count,
+                 SUM(CASE WHEN side='S' THEN 1 ELSE 0 END) AS short_count
+               FROM liquidations
+               WHERE asset=? AND ts>=?""",
+            (coin, cutoff),
+        )
+        if not row:
+            return {
+                "long_notional": 0.0,
+                "short_notional": 0.0,
+                "total_notional": 0.0,
+                "long_count": 0,
+                "short_count": 0,
+                "total_count": 0,
+            }
+        long_notional = float(row["long_notional"] or 0.0)
+        short_notional = float(row["short_notional"] or 0.0)
+        long_count = int(row["long_count"] or 0)
+        short_count = int(row["short_count"] or 0)
+        return {
+            "long_notional": long_notional,
+            "short_notional": short_notional,
+            "total_notional": long_notional + short_notional,
+            "long_count": long_count,
+            "short_count": short_count,
+            "total_count": long_count + short_count,
+        }
+
+    def get_orderbook_imbalance_window(self, asset: str, lookback_ms: int) -> list[dict]:
+        cutoff = int(time.time() * 1000) - lookback_ms
+        rows = self._q(
+            """SELECT ts, bid_total, ask_total, imbalance_ratio, spread, mid_px
+               FROM orderbook_snapshots WHERE asset=? AND ts>=? ORDER BY ts ASC""",
+            (asset, cutoff),
+        )
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # Read: OHLCV (new — used by VWAP/Spot-Led signals)
@@ -480,13 +604,57 @@ class SQLiteDataStore:
             )
         return [dict(r) for r in rows]
 
+    def prune_old_ticks(self, max_age_ms: int) -> dict[str, int]:
+        cutoff = int(time.time() * 1000) - max_age_ms
+        deleted_trade_ticks = self._exec(
+            "DELETE FROM trade_ticks WHERE ts < ?",
+            (cutoff,),
+        ).rowcount
+        deleted_orderbook = self._exec(
+            "DELETE FROM orderbook_snapshots WHERE ts < ?",
+            (cutoff,),
+        ).rowcount
+        deleted_liquidations = self._exec(
+            "DELETE FROM liquidations WHERE ts < ?",
+            (cutoff,),
+        ).rowcount
+        return {
+            "trade_ticks": max(deleted_trade_ticks, 0),
+            "orderbook_snapshots": max(deleted_orderbook, 0),
+            "liquidations": max(deleted_liquidations, 0),
+        }
+
     # ------------------------------------------------------------------
     # Diagnostics (mirrors original DataStore interface)
     # ------------------------------------------------------------------
 
     def counts(self) -> dict:
         result = {}
-        for table in ("funding_rates", "open_interest", "volume_snapshots", "ohlcv", "asset_snapshots", "trade_candidates"):
+        for table in (
+            "funding_rates",
+            "open_interest",
+            "volume_snapshots",
+            "trade_ticks",
+            "liquidations",
+            "orderbook_snapshots",
+            "ohlcv",
+            "asset_snapshots",
+            "trade_candidates",
+        ):
             row = self._q1(f"SELECT COUNT(*) AS n FROM {table}")
             result[table] = row["n"] if row else 0
         return result
+
+    def _normalize_book_levels(self, levels: list[dict], depth_levels: int) -> list[dict]:
+        normalized: list[dict] = []
+        for level in levels[:depth_levels]:
+            try:
+                px = float(level.get("px", 0))
+                sz = float(level.get("sz", 0))
+                n_orders = int(level.get("n", 0))
+            except (AttributeError, TypeError, ValueError):
+                continue
+            if px <= 0 or sz <= 0:
+                continue
+            normalized.append({"px": px, "sz": sz, "n": n_orders})
+        return normalized
