@@ -104,6 +104,26 @@ def test_funding_velocity_signal_detects_crowding_acceleration(tmp_path):
     store.close()
 
 
+def test_store_add_oi_dedupes_same_timestamp(tmp_path):
+    store = SQLiteDataStore(db_path=str(tmp_path / "oi_dedupe.db"))
+    now_ms = int(time.time() * 1000)
+
+    store.add_oi("BTC", 1_000_000, now_ms, source="bybit")
+    store.add_oi("BTC", 1_000_000, now_ms, source="bybit")
+    store.add_oi("BTC", 1_050_000, now_ms + 60_000, source="bybit")
+
+    rows = store._q(
+        "SELECT ts, oi, oi_change_pct FROM open_interest WHERE asset=? AND source=? ORDER BY ts ASC",
+        ("BTC", "bybit"),
+    )
+
+    assert len(rows) == 2
+    assert rows[0]["oi"] == 1_000_000
+    assert rows[1]["oi"] == 1_050_000
+    assert rows[1]["oi_change_pct"] == 5.0
+    store.close()
+
+
 def test_leverage_flush_signal_detects_post_long_flush_reversal(tmp_path):
     store = SQLiteDataStore(db_path=str(tmp_path / "leverage_flush.db"))
     now_ms = int(time.time() * 1000)

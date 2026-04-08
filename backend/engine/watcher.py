@@ -13,10 +13,16 @@ class Watcher:
         self.callbacks = []
         self._running = False
         self._listen_task = None
+        self._subscriptions: set[str] = set()
         
     def add_callback(self, callback: Callable[[str, Dict], None]):
         """Callback signature: (address: str, data: dict) -> None"""
-        self.callbacks.append(callback)
+        if callback not in self.callbacks:
+            self.callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[str, Dict], None]):
+        if callback in self.callbacks:
+            self.callbacks.remove(callback)
 
     async def start(self):
         if self._running:
@@ -44,6 +50,8 @@ class Watcher:
         logger.info("Watcher stopped")
 
     async def subscribe_to_user(self, address: str):
+        self._subscriptions.add(address)
+
         async def user_callback(update):
             for cb in self.callbacks:
                 try:
@@ -56,6 +64,13 @@ class Watcher:
 
         await self.ws_client.subscribe_user(address, user_callback)
         logger.info(f"Subscribed to user updates for {address}")
+
+    def snapshot(self) -> dict:
+        return {
+            "running": self._running,
+            "subscription_count": len(self._subscriptions),
+            "callback_count": len(self.callbacks),
+        }
 
 # Create a global instance for easy import
 watcher = Watcher()

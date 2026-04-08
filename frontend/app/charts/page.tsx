@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 
 import CandlestickChart, {
   type ChartHandle,
@@ -24,7 +25,8 @@ interface ActiveIndicator {
   name: string;
 }
 
-export default function ChartsPage() {
+function ChartsContent() {
+  const searchParams = useSearchParams();
   const [asset, setAsset] = useState<ChartAsset>("BTC");
   const [activeIndicators, setActiveIndicators] = useState<ActiveIndicator[]>([]);
   const [code, setCode] = useState("");
@@ -80,6 +82,56 @@ export default function ChartsPage() {
   }, []);
 
   const assetConfig = ASSETS[asset];
+
+  useEffect(() => {
+    const qAsset = searchParams.get("asset") as ChartAsset | null;
+    const qTime = searchParams.get("time");
+    const qDir = searchParams.get("dir");
+    const qPrice = searchParams.get("price");
+
+    if (qAsset && CHART_ASSETS.includes(qAsset) && qAsset !== asset) {
+      setAsset(qAsset);
+    }
+
+    if (qTime && qDir && chartRef.current && chartData.length > 0) {
+      const timeMs = parseInt(qTime, 10);
+      const isLong = qDir === "Long";
+      
+      let plotValue = 0;
+      if (qPrice && !isNaN(parseFloat(qPrice))) {
+        plotValue = parseFloat(qPrice);
+      } else {
+        // Find closest candle if no price
+        const candle = chartData.find(c => c.time >= timeMs) || chartData[chartData.length - 1];
+        plotValue = candle ? candle.close : 0;
+      }
+
+      if (plotValue === 0) return;
+
+      const plots = {
+        signal: {
+          data: [{
+            time: timeMs,
+            value: plotValue
+          }],
+          options: {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            style: "shape" as any,
+            shape: isLong ? "arrow_up" : "arrow_down",
+            color: isLong ? "#38a67c" : "#bc263e",
+            location: isLong ? "belowBar" : "aboveBar",
+            size: "large"
+          }
+        }
+      };
+
+      // Add marker after short delay to ensure chart handles data update first
+      const t = setTimeout(() => {
+        chartRef.current?.addIndicator("signal_marker", plots, { overlay: true });
+      }, 50);
+      return () => clearTimeout(t);
+    }
+  }, [searchParams, chartData, asset]);
 
   return (
     <section className="space-y-5">
@@ -147,3 +199,12 @@ export default function ChartsPage() {
     </section>
   );
 }
+
+export default function ChartsPage() {
+  return (
+    <Suspense fallback={<div className="panel p-8 text-center text-[--text-secondary]">Loading charts...</div>}>
+      <ChartsContent />
+    </Suspense>
+  );
+}
+

@@ -135,6 +135,20 @@ _SIGNAL_PRIORITY: dict[str, int] = {
 # Signals that are modifier-only (never trigger a candidate alone unless paired)
 _MODIFIER_ONLY = {"vwap_deviation"}
 
+_SIGNAL_DATA_DEPENDENCIES: dict[str, set[str]] = {
+    "funding_extremes": {"funding_rates", "asset_snapshots"},
+    "funding_velocity": {"funding_rates", "asset_snapshots"},
+    "liquidation_cascade": {"liquidations"},
+    "leverage_flush": {"open_interest", "asset_snapshots", "liquidations"},
+    "orderbook_imbalance": {"orderbook_snapshots"},
+    "oi_volume_divergence": {"open_interest", "volume_snapshots", "asset_snapshots"},
+    "trade_flow_imbalance": {"trade_ticks"},
+    "spot_led_flow": {"volume_snapshots", "open_interest", "asset_snapshots"},
+    "vwap_deviation": {"ohlcv"},
+    "cvd_divergence": {"trade_ticks"},
+    "premium_extremes": {"asset_snapshots"},
+}
+
 
 # ---------------------------------------------------------------------------
 # Engine
@@ -383,3 +397,9 @@ class SignalEngine:
             return "Mixed Signals", "MEDIUM"
         else:
             return "Single Signal", "LOW"
+
+    def required_datasets_for_candidate(self, candidate: TradeCandidate) -> set[str]:
+        required: set[str] = set()
+        for signal in candidate.signals:
+            required.update(_SIGNAL_DATA_DEPENDENCIES.get(signal.signal_name, set()))
+        return required

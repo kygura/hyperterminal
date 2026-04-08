@@ -26,11 +26,24 @@ telegram:
 alerts:
   cooldown_seconds: 3600
   telegram_min_interval_seconds: 10
+  telegram_queue_size: 500
 
 engine:
   tick_interval_seconds: 3600
   signal_refresh_enabled: true
   signal_refresh_debounce_seconds: 2.0
+  signal_refresh_max_pending_assets: 128
+
+freshness:
+  mode: warn
+  asset_snapshot_max_age_seconds: 900
+  funding_max_age_seconds: 7200
+  oi_max_age_seconds: 7200
+  spot_volume_max_age_seconds: 7200
+  ohlcv_max_age_seconds: 7200
+  trade_ticks_max_age_seconds: 900
+  orderbook_max_age_seconds: 900
+  liquidations_max_age_seconds: 1800
 
 confluence:
   thresholds:

@@ -68,6 +68,25 @@ def test_store_spot_volume_rolling_avg_uses_spot_rows_only(tmp_path):
     store.close()
 
 
+def test_store_add_trade_upserts_same_minute_bucket(tmp_path):
+    store = SQLiteDataStore(db_path=str(tmp_path / "trade_buckets.db"))
+    now_ms = int(time.time() * 1000)
+
+    store.add_trade("BTC", "B", 100_000, 1.0, now_ms)
+    store.add_trade("BTC", "B", 100_000, 0.5, now_ms + 5_000)
+
+    rows = store._q(
+        "SELECT ts, buy_volume, sell_volume, futures_volume FROM volume_snapshots WHERE asset=? AND source=?",
+        ("BTC", "hyperliquid_ws"),
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["buy_volume"] == 150_000
+    assert rows[0]["sell_volume"] == 0
+    assert rows[0]["futures_volume"] == 150_000
+    store.close()
+
+
 def test_orderbook_imbalance_signal_detects_persistent_bid_pressure(tmp_path):
     store = SQLiteDataStore(db_path=str(tmp_path / "orderbook_signal.db"))
     base_ts = int(time.time() * 1000) - 10_000

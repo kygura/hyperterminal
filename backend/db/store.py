@@ -52,14 +52,28 @@ class SQLiteDataStore:
     # ------------------------------------------------------------------
 
     def _open(self) -> None:
-        Path(self._path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(
-            self._path,
-            check_same_thread=False,  # single event-loop writer
-            isolation_level=None,     # autocommit; we manage transactions manually
-        )
-        self._conn.row_factory = sqlite3.Row
-        apply_schema(self._conn)
+        db_file = Path(self._path)
+        db_file.parent.mkdir(parents=True, exist_ok=True)
+
+        def _connect() -> sqlite3.Connection:
+            conn = sqlite3.connect(
+                self._path,
+                check_same_thread=False,
+                isolation_level=None,
+            )
+            conn.row_factory = sqlite3.Row
+            return conn
+
+        self._conn = _connect()
+        try:
+            apply_schema(self._conn)
+        except sqlite3.IntegrityError as exc:
+            logger.warning("Rebuilding SQLite DB %s after schema migration failure: %s", self._path, exc)
+            self._conn.close()
+            if db_file.exists():
+                db_file.unlink()
+            self._conn = _connect()
+            apply_schema(self._conn)
         logger.info("SQLiteDataStore opened: %s", self._path)
 
     def close(self) -> None:
@@ -95,7 +109,11 @@ class SQLiteDataStore:
         if not all(_is_valid_number(v) for v in (rate, premium, ts)):
             return
         self._exec(
-            "INSERT INTO funding_rates(ts, asset, source, rate, predicted) VALUES(?,?,?,?,?)",
+            """INSERT INTO funding_rates(ts, asset, source, rate, predicted)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(asset, source, ts) DO UPDATE SET
+                   rate = excluded.rate,
+                   predicted = excluded.predicted""",
             (int(ts), coin, source, float(rate), float(premium)),
         )
 
@@ -128,15 +146,21 @@ class SQLiteDataStore:
     def _upsert_oi(self, coin: str, oi: float, ts: int, source: str) -> None:
         # Compute % change vs previous reading
         prev = self._q1(
-            "SELECT oi FROM open_interest WHERE asset=? AND source=? ORDER BY ts DESC LIMIT 1",
-            (coin, source),
+            """SELECT oi FROM open_interest
+               WHERE asset=? AND source=? AND ts < ?
+               ORDER BY ts DESC LIMIT 1""",
+            (coin, source, ts),
         )
         if prev and prev["oi"] and prev["oi"] != 0:
             oi_change_pct = (oi - prev["oi"]) / prev["oi"] * 100
         else:
             oi_change_pct = 0.0
         self._exec(
-            "INSERT INTO open_interest(ts, asset, source, oi, oi_change_pct) VALUES(?,?,?,?,?)",
+            """INSERT INTO open_interest(ts, asset, source, oi, oi_change_pct)
+               VALUES(?,?,?,?,?)
+               ON CONFLICT(asset, source, ts) DO UPDATE SET
+                   oi = excluded.oi,
+                   oi_change_pct = excluded.oi_change_pct""",
             (ts, coin, source, oi, oi_change_pct),
         )
 
@@ -156,16 +180,11 @@ class SQLiteDataStore:
         self._exec(
             """INSERT INTO volume_snapshots(ts, asset, source, buy_volume, sell_volume, futures_volume)
                VALUES(?,?,?,?,?,?)
-               ON CONFLICT DO NOTHING""",
-            (bucket_ms, coin, "hyperliquid_ws", 0.0, 0.0, 0.0),
-        )
-        self._exec(
-            """UPDATE volume_snapshots
-               SET buy_volume = buy_volume + ?,
-                   sell_volume = sell_volume + ?,
-                   futures_volume = futures_volume + ?
-               WHERE ts=? AND asset=? AND source=?""",
-            (buy_vol, sell_vol, notional, bucket_ms, coin, "hyperliquid_ws"),
+               ON CONFLICT(asset, source, ts) DO UPDATE SET
+                   buy_volume = volume_snapshots.buy_volume + excluded.buy_volume,
+                   sell_volume = volume_snapshots.sell_volume + excluded.sell_volume,
+                   futures_volume = volume_snapshots.futures_volume + excluded.futures_volume""",
+            (bucket_ms, coin, "hyperliquid_ws", buy_vol, sell_vol, notional),
         )
 
     def add_trade_tick(self, coin: str, side: str, px: float, sz: float, ts: int) -> None:
@@ -253,8 +272,15 @@ class SQLiteDataStore:
         """Insert OHLCV candle. VWAP computed as (H+L+C)/3 approximation."""
         vwap = (high + low + close) / 3.0
         self._exec(
-            """INSERT OR IGNORE INTO ohlcv(ts, asset, source, timeframe, open, high, low, close, volume, vwap)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO ohlcv(ts, asset, source, timeframe, open, high, low, close, volume, vwap)
+               VALUES(?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(asset, source, timeframe, ts) DO UPDATE SET
+                   open = excluded.open,
+                   high = excluded.high,
+                   low = excluded.low,
+                   close = excluded.close,
+                   volume = excluded.volume,
+                   vwap = excluded.vwap""",
             (int(ts), asset, source, timeframe, open_, high, low, close, volume, vwap),
         )
 
@@ -284,8 +310,11 @@ class SQLiteDataStore:
         source: str = "bybit",
     ) -> None:
         self._exec(
-            """INSERT OR IGNORE INTO volume_snapshots(ts, asset, source, buy_volume, sell_volume, spot_volume, futures_volume)
-               VALUES(?,?,?,0,0,?,?)""",
+            """INSERT INTO volume_snapshots(ts, asset, source, buy_volume, sell_volume, spot_volume, futures_volume)
+               VALUES(?,?,?,0,0,?,?)
+               ON CONFLICT(asset, source, ts) DO UPDATE SET
+                   spot_volume = excluded.spot_volume,
+                   futures_volume = excluded.futures_volume""",
             (int(ts), coin, source, spot_volume, futures_volume),
         )
 
@@ -303,17 +332,45 @@ class SQLiteDataStore:
         price: Optional[float] = None,
         vwap: Optional[float] = None,
         alert_sent: bool = False,
-    ) -> None:
+        delivery_bucket: Optional[str] = None,
+        dedupe_key: Optional[str] = None,
+    ) -> bool:
         ts = int(time.time() * 1000)
-        self._exec(
-            """INSERT INTO trade_candidates(ts, asset, direction, regime, conviction, signal_count, signals_json, price, vwap, alert_sent)
-               VALUES(?,?,?,?,?,?,?,?,?,?)""",
+        cursor = self._exec(
+            """INSERT INTO trade_candidates(
+                   ts, asset, direction, regime, conviction, signal_count, signals_json,
+                   price, vwap, alert_sent, delivery_bucket, dedupe_key
+               )
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(delivery_bucket, dedupe_key) DO NOTHING""",
             (
                 ts, asset, direction, regime, conviction,
                 len(signal_names), json.dumps(signal_names),
                 price, vwap, 1 if alert_sent else 0,
+                delivery_bucket, dedupe_key,
             ),
         )
+        return cursor.rowcount > 0
+
+    def get_latest_timestamps(self, asset: str) -> dict[str, Optional[int]]:
+        table_specs = {
+            "asset_snapshots": ("asset_snapshots", "asset"),
+            "funding_rates": ("funding_rates", "asset"),
+            "open_interest": ("open_interest", "asset"),
+            "volume_snapshots": ("volume_snapshots", "asset"),
+            "ohlcv": ("ohlcv", "asset"),
+            "trade_ticks": ("trade_ticks", "asset"),
+            "orderbook_snapshots": ("orderbook_snapshots", "asset"),
+            "liquidations": ("liquidations", "asset"),
+        }
+        latest: dict[str, Optional[int]] = {}
+        for key, (table, field) in table_specs.items():
+            row = self._q1(
+                f"SELECT MAX(ts) AS ts FROM {table} WHERE {field}=?",
+                (asset,),
+            )
+            latest[key] = int(row["ts"]) if row and row["ts"] is not None else None
+        return latest
 
     # ------------------------------------------------------------------
     # Read: funding window (mirrors original DataStore interface)

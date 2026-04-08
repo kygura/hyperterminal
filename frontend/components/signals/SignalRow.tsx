@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ASSETS, type Signal } from "@/lib/types";
 
 interface SignalRowProps {
@@ -51,6 +52,7 @@ function convictionTone(conviction: Signal["conviction"]): string {
 }
 
 export function SignalRow({ signal, isFresh = false }: SignalRowProps) {
+  const router = useRouter();
   const [entered, setEntered] = useState(!isFresh);
   const [highlighted, setHighlighted] = useState(isFresh);
 
@@ -87,10 +89,22 @@ export function SignalRow({ signal, isFresh = false }: SignalRowProps) {
       ? signal.signals.map((entry) => formatTypeLabel(entry)).join(", ")
       : `${signal.signalCount} active`;
 
+  const handleRowClick = () => {
+    const params = new URLSearchParams();
+    params.set("asset", signal.asset);
+    params.set("time", new Date(signal.timestamp).getTime().toString());
+    params.set("dir", signal.direction);
+    if (signal.price) {
+      params.set("price", signal.price.toString());
+    }
+    router.push(`/charts?${params.toString()}`);
+  };
+
   return (
     <div
+      onClick={handleRowClick}
       className={[
-        "grid grid-cols-[0.95fr_0.8fr_0.7fr_0.9fr_1.25fr_1.8fr_0.9fr_0.9fr] gap-3 border-b border-[--border-subtle] px-4 py-2.5 text-[12px] transition-all duration-300 ease-out last:border-b-0",
+        "cursor-pointer grid grid-cols-[0.95fr_0.8fr_0.7fr_0.9fr_1.25fr_1.8fr_0.9fr_0.9fr] gap-3 border-b border-[--border-subtle] px-4 py-2.5 text-[12px] transition-all duration-300 ease-out last:border-b-0 hover:bg-[--bg-hover]",
         entered ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0",
         highlighted ? "bg-[rgba(237,54,2,0.06)]" : "bg-transparent",
       ].join(" ")}

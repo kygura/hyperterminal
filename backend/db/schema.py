@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS funding_rates (
     predicted   REAL                    -- predicted next rate if available
 );
 CREATE INDEX IF NOT EXISTS idx_fr_asset_ts ON funding_rates(asset, ts DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fr_asset_source_ts ON funding_rates(asset, source, ts);
 
 CREATE TABLE IF NOT EXISTS open_interest (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,6 +35,7 @@ CREATE TABLE IF NOT EXISTS open_interest (
     oi_change_pct REAL                  -- % change vs previous reading
 );
 CREATE INDEX IF NOT EXISTS idx_oi_asset_ts ON open_interest(asset, ts DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_oi_asset_source_ts ON open_interest(asset, source, ts);
 
 CREATE TABLE IF NOT EXISTS volume_snapshots (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,6 +48,7 @@ CREATE TABLE IF NOT EXISTS volume_snapshots (
     futures_volume REAL NOT NULL DEFAULT 0   -- futures notional
 );
 CREATE INDEX IF NOT EXISTS idx_vol_asset_ts ON volume_snapshots(asset, ts DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vol_asset_source_ts ON volume_snapshots(asset, source, ts);
 
 CREATE TABLE IF NOT EXISTS trade_ticks (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +127,9 @@ CREATE TABLE IF NOT EXISTS trade_candidates (
     signals_json TEXT   NOT NULL,       -- JSON array of contributing signal names
     price       REAL,
     vwap        REAL,
-    alert_sent  INTEGER NOT NULL DEFAULT 0  -- 0=no, 1=yes
+    alert_sent  INTEGER NOT NULL DEFAULT 0,  -- 0=no, 1=yes
+    delivery_bucket TEXT,
+    dedupe_key  TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_tc_asset_ts ON trade_candidates(asset, ts DESC);
 
@@ -187,4 +192,15 @@ CREATE INDEX IF NOT EXISTS idx_branch_trades_branch_entry ON branch_trades(branc
 def apply_schema(conn) -> None:
     """Apply DDL to an open sqlite3 connection."""
     conn.executescript(DDL)
+    columns = {
+        row[1]
+        for row in conn.execute("PRAGMA table_info(trade_candidates)").fetchall()
+    }
+    if "delivery_bucket" not in columns:
+        conn.execute("ALTER TABLE trade_candidates ADD COLUMN delivery_bucket TEXT")
+    if "dedupe_key" not in columns:
+        conn.execute("ALTER TABLE trade_candidates ADD COLUMN dedupe_key TEXT")
+    conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_tc_bucket_dedupe ON trade_candidates(delivery_bucket, dedupe_key)"
+    )
     conn.commit()

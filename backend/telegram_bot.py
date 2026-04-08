@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -44,9 +45,15 @@ class TelegramBot:
         if remaining > 0:
             await asyncio.sleep(remaining)
 
-    async def _send(self, text: str, disable_notification: bool = False) -> bool:
+    @dataclass
+    class SendResult:
+        ok: bool
+        transient: bool = False
+        error: Optional[str] = None
+
+    async def _send(self, text: str, disable_notification: bool = False) -> "TelegramBot.SendResult":
         if self._disabled or self._bot is None:
-            return False
+            return TelegramBot.SendResult(ok=False, transient=False, error="telegram disabled")
 
         max_retries = 3
         backoff = 5.0
@@ -61,7 +68,7 @@ class TelegramBot:
                     disable_notification=disable_notification,
                 )
                 self._last_sent_at = time.monotonic()
-                return True
+                return TelegramBot.SendResult(ok=True)
             except RetryAfter as exc:
                 await asyncio.sleep(exc.retry_after + 1)
             except (TimedOut, NetworkError) as exc:
@@ -75,18 +82,17 @@ class TelegramBot:
             except TelegramError as exc:
                 logger.error("TelegramBot: non-transient error: %s — disabling Telegram", exc)
                 self._disabled = True
-                return False
+                return TelegramBot.SendResult(ok=False, transient=False, error=str(exc))
             except Exception as exc:
                 logger.error("TelegramBot: unexpected error: %s", exc, exc_info=True)
-                self._disabled = True
-                return False
+                return TelegramBot.SendResult(ok=False, transient=True, error=str(exc))
 
         logger.error("TelegramBot: max retries exceeded, message dropped")
-        return False
+        return TelegramBot.SendResult(ok=False, transient=True, error="max retries exceeded")
 
     async def send_alert(self, message: str, priority: str) -> None:
-        success = await self._send(message, disable_notification=(priority == "LOW"))
-        if success:
+        result = await self._send(message, disable_notification=(priority == "LOW"))
+        if result.ok:
             logger.info("TelegramBot: alert sent [%s]", priority)
 
     async def send_startup_message(self, assets: list[str], signals: list[str]) -> None:
@@ -114,6 +120,7 @@ class TelegramBot:
         uptime_s: int,
         total_alerts: int,
         data_counts: dict,
+        runtime_snapshot: Optional[dict] = None,
     ) -> None:
         h, rem = divmod(uptime_s, 3600)
         m, s = divmod(rem, 60)
@@ -124,14 +131,15 @@ class TelegramBot:
             "",
             "<b>Data counts:</b>",
         ]
-        funding_counts = data_counts.get("funding", {})
-        snap_counts = data_counts.get("snapshots", {})
-        trade_counts = data_counts.get("trades", {})
-        for coin in sorted(set(list(funding_counts) + list(snap_counts) + list(trade_counts))):
-            lines.append(
-                f"  {coin}: funding={funding_counts.get(coin, 0)} "
-                f"snaps={snap_counts.get(coin, 0)} "
-                f"trades={trade_counts.get(coin, 0)}"
+        for key, value in sorted(data_counts.items()):
+            lines.append(f"  {key}: {value}")
+        if runtime_snapshot:
+            lines.extend(
+                [
+                    "",
+                    f"<b>Runtime:</b> {runtime_snapshot.get('status', 'unknown')}",
+                    f"Pending refresh assets: {runtime_snapshot.get('refresh', {}).get('pending_count', 0)}",
+                    f"Telegram queue depth: {runtime_snapshot.get('telegram_queue_depth', 0)}",
+                ]
             )
-        lines.append(f"  Liquidations: {data_counts.get('liquidations', 0)}")
         await self._send("\n".join(lines), disable_notification=True)

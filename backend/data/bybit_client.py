@@ -9,9 +9,11 @@ Docs: https://bybit-exchange.github.io/docs/v5/intro
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
+import random
 import time
 from typing import Any, Optional
 from urllib.parse import urlencode
@@ -33,7 +35,7 @@ class BybitClient:
 
     async def start(self) -> None:
         self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=20),
+            timeout=aiohttp.ClientTimeout(total=15, connect=5, sock_read=10),
         )
         logger.info("BybitClient started")
 
@@ -76,23 +78,42 @@ class BybitClient:
                 "X-BAPI-RECV-WINDOW": "5000",
                 "X-BAPI-SIGN": sig,
             }
-        try:
-            async with self._session.get(url, params=params, headers=headers) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-                if data.get("retCode", 0) != 0:
-                    logger.warning(
-                        "Bybit API error %s: %s (path=%s params=%s)",
-                        data.get("retCode"), data.get("retMsg"), path, params,
-                    )
-                    return None
-                return data.get("result")
-        except aiohttp.ClientResponseError as exc:
-            logger.error("BybitClient HTTP %s for %s: %s", exc.status, path, exc)
-        except aiohttp.ClientError as exc:
-            logger.error("BybitClient network error for %s: %s", path, exc)
-        except Exception as exc:
-            logger.error("BybitClient unexpected error for %s: %s", path, exc, exc_info=True)
+        retryable_statuses = {408, 429, 500, 502, 503, 504}
+        for attempt in range(1, 4):
+            try:
+                async with self._session.get(url, params=params, headers=headers) as resp:
+                    if resp.status in retryable_statuses and attempt < 3:
+                        retry_after = resp.headers.get("Retry-After")
+                        delay = float(retry_after) if retry_after else (0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25))
+                        logger.warning("BybitClient retryable HTTP %s for %s (attempt %d/3)", resp.status, path, attempt)
+                        await asyncio.sleep(delay)
+                        continue
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    if data.get("retCode", 0) != 0:
+                        logger.warning(
+                            "Bybit API error %s: %s (path=%s params=%s)",
+                            data.get("retCode"), data.get("retMsg"), path, params,
+                        )
+                        return None
+                    return data.get("result")
+            except aiohttp.ClientResponseError as exc:
+                if exc.status in retryable_statuses and attempt < 3:
+                    delay = 0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25)
+                    logger.warning("BybitClient retryable HTTP %s for %s (attempt %d/3)", exc.status, path, attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error("BybitClient HTTP %s for %s: %s", exc.status, path, exc)
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                if attempt < 3:
+                    delay = 0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25)
+                    logger.warning("BybitClient transient error for %s (attempt %d/3): %s", path, attempt, exc)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error("BybitClient network error for %s: %s", path, exc)
+            except Exception as exc:
+                logger.error("BybitClient unexpected error for %s: %s", path, exc, exc_info=True)
+                break
         return None
 
     # ------------------------------------------------------------------

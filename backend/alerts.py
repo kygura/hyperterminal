@@ -66,6 +66,9 @@ class AlertManager:
             return time.strftime("%Y-%m-%d", tm)
         return time.strftime("%Y-%m-%dT%H", tm)
 
+    def delivery_bucket_for(self, timestamp: float) -> str:
+        return self._bucket_for(timestamp)
+
     def should_fire(self, candidate: TradeCandidate) -> bool:
         key = (candidate.coin, candidate.direction)
         bucket = self._bucket_for(candidate.timestamp)
@@ -176,6 +179,19 @@ class AlertManager:
             f"[{ts_str}] {candidate.coin} {dir_str} — "
             f"{candidate.regime} [{candidate.conviction}] "
             f"({signal_names})"
+        )
+
+    def candidate_fingerprint(self, candidate: TradeCandidate) -> str:
+        signal_names = sorted(signal.signal_name for signal in candidate.signals)
+        return "|".join(
+            [
+                candidate.coin,
+                candidate.direction,
+                candidate.regime,
+                candidate.conviction,
+                ",".join(signal_names),
+                self.delivery_bucket_for(candidate.timestamp),
+            ]
         )
 
 

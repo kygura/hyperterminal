@@ -145,10 +145,13 @@ def validate_config(global_config: dict, dry_run: bool) -> None:
         if not chat_id or chat_id in ("not_yet", "your_chat_id_here"):
             errors.append("TELEGRAM_CHAT_ID not set (use --dry-run to skip Telegram)")
 
+    freshness = global_config.get("freshness", {})
+    freshness_mode = str(freshness.get("mode", "warn")).strip().lower()
+    if freshness_mode not in {"off", "warn", "enforce"}:
+        errors.append("global.yaml: freshness.mode must be one of off|warn|enforce")
+
     if errors:
-        for e in errors:
-            print(f"[CONFIG ERROR] {e}", file=sys.stderr)
-        sys.exit(1)
+        raise ValueError("; ".join(errors))
 
     logger.info("Config validation passed")
 
@@ -162,6 +165,7 @@ def resolve_runtime_settings(global_config: dict) -> dict:
     polling = global_config.get("polling", {})
     engine = global_config.get("engine", {})
     alerts = global_config.get("alerts", {})
+    freshness = global_config.get("freshness", {})
     profile = _TIMEFRAME_PROFILES[timeframe]
     signal_refresh_enabled = bool(engine.get("signal_refresh_enabled", True))
 
@@ -182,6 +186,7 @@ def resolve_runtime_settings(global_config: dict) -> dict:
         "tick_interval_seconds": resolved(engine, "tick_interval_seconds"),
         "signal_refresh_enabled": signal_refresh_enabled,
         "signal_refresh_debounce_seconds": float(engine.get("signal_refresh_debounce_seconds", 2.0)),
+        "signal_refresh_max_pending_assets": max(int(engine.get("signal_refresh_max_pending_assets", 128)), 1),
         "cooldown_seconds": max(
             int(alerts.get("cooldown_seconds", profile["cooldown_seconds"])),
             int(profile["cooldown_seconds"]),
@@ -190,6 +195,18 @@ def resolve_runtime_settings(global_config: dict) -> dict:
             float(alerts.get("telegram_min_interval_seconds", 10)),
             10.0,
         ),
+        "telegram_queue_size": max(int(alerts.get("telegram_queue_size", 500)), 1),
+        "freshness_mode": str(freshness.get("mode", "warn")).strip().lower(),
+        "freshness_thresholds": {
+            "asset_snapshots": max(int(freshness.get("asset_snapshot_max_age_seconds", 900)), 1),
+            "funding_rates": max(int(freshness.get("funding_max_age_seconds", 7200)), 1),
+            "open_interest": max(int(freshness.get("oi_max_age_seconds", 7200)), 1),
+            "volume_snapshots": max(int(freshness.get("spot_volume_max_age_seconds", 7200)), 1),
+            "ohlcv": max(int(freshness.get("ohlcv_max_age_seconds", 7200)), 1),
+            "trade_ticks": max(int(freshness.get("trade_ticks_max_age_seconds", 900)), 1),
+            "orderbook_snapshots": max(int(freshness.get("orderbook_max_age_seconds", 900)), 1),
+            "liquidations": max(int(freshness.get("liquidations_max_age_seconds", 1800)), 1),
+        },
     }
 
 
@@ -209,6 +226,26 @@ def serialize_candidate(candidate: TradeCandidate, timeframe: str) -> dict:
         "vwap": vwap,
         "timeframe": timeframe,
     }
+
+
+def candidate_freshness_status(
+    engine: SignalEngine,
+    store: SQLiteDataStore,
+    candidate: TradeCandidate,
+    thresholds: dict[str, int],
+) -> list[str]:
+    latest = store.get_latest_timestamps(candidate.coin)
+    required = engine.required_datasets_for_candidate(candidate)
+    now_ms = int(time.time() * 1000)
+    stale: list[str] = []
+    for dataset in required:
+        latest_ts = latest.get(dataset)
+        max_age_seconds = thresholds.get(dataset)
+        if max_age_seconds is None:
+            continue
+        if latest_ts is None or (now_ms - latest_ts) > (max_age_seconds * 1000):
+            stale.append(dataset)
+    return stale
 
 
 # ---------------------------------------------------------------------------
@@ -493,31 +530,40 @@ async def process_signal_candidates(
     alert_manager: AlertManager,
     store: SQLiteDataStore,
     telegram: Optional[TelegramBot],
+    telegram_queue: Optional[asyncio.Queue[tuple[str, str]]],
     coins: list[str],
     dry_run: bool,
     timeframe: str,
+    freshness_mode: str = "warn",
+    freshness_thresholds: Optional[dict[str, int]] = None,
     on_candidate=None,
 ) -> None:
     results = await engine.evaluate_all(coins)
     candidates = engine.score_confluence(results)
+    freshness_thresholds = freshness_thresholds or {}
 
     for candidate in candidates:
         if not alert_manager.should_fire(candidate):
             continue
 
-        alert_manager.record_fire(candidate)
         full_message = alert_manager.format_alert(candidate)
         send_telegram = alert_manager.should_telegram(candidate)
+        stale_datasets = candidate_freshness_status(engine, store, candidate, freshness_thresholds)
+        if stale_datasets:
+            logger.warning(
+                "Freshness check for %s failed: stale datasets=%s mode=%s",
+                candidate.coin,
+                stale_datasets,
+                freshness_mode,
+            )
+            if freshness_mode == "enforce":
+                continue
 
-        print(f"\n{'='*60}\n{full_message}\n{'='*60}\n")
-        logger.info(
-            "Trade candidate: %s %s [%s] %s — %d signals",
-            candidate.coin, candidate.direction, candidate.conviction,
-            candidate.regime, len(candidate.signals),
-        )
+        delivery_bucket = alert_manager.delivery_bucket_for(candidate.timestamp)
+        dedupe_key = alert_manager.candidate_fingerprint(candidate)
 
         try:
-            store.add_trade_candidate(
+            inserted = store.add_trade_candidate(
                 asset=candidate.coin,
                 direction=candidate.direction,
                 regime=candidate.regime,
@@ -526,9 +572,23 @@ async def process_signal_candidates(
                 price=candidate.vwap_state.get("current_price") if candidate.vwap_state else None,
                 vwap=candidate.vwap_state.get("vwap") if candidate.vwap_state else None,
                 alert_sent=send_telegram and not dry_run,
+                delivery_bucket=delivery_bucket,
+                dedupe_key=dedupe_key,
             )
         except Exception as exc:
             logger.error("Failed to log trade candidate: %s", exc)
+            continue
+
+        if not inserted:
+            logger.debug("Skipping duplicate trade candidate for %s bucket=%s", candidate.coin, delivery_bucket)
+            continue
+
+        print(f"\n{'='*60}\n{full_message}\n{'='*60}\n")
+        logger.info(
+            "Trade candidate: %s %s [%s] %s — %d signals",
+            candidate.coin, candidate.direction, candidate.conviction,
+            candidate.regime, len(candidate.signals),
+        )
 
         if on_candidate is not None:
             try:
@@ -542,19 +602,27 @@ async def process_signal_candidates(
                     "DRY-RUN: would send Telegram for %s %s [%s]",
                     candidate.coin, candidate.direction, candidate.conviction,
                 )
-            elif telegram:
-                await telegram.send_alert(full_message, candidate.conviction)
+            elif telegram and telegram_queue is not None:
+                try:
+                    telegram_queue.put_nowait((full_message, candidate.conviction))
+                except asyncio.QueueFull:
+                    logger.warning("Telegram queue full; dropping alert for %s", candidate.coin)
+
+        alert_manager.record_fire(candidate)
 
 async def engine_tick_loop(
     engine: SignalEngine,
     alert_manager: AlertManager,
     store: SQLiteDataStore,
     telegram: Optional[TelegramBot],
+    telegram_queue: Optional[asyncio.Queue[tuple[str, str]]],
     coins: list[str],
     tick_interval_s: int,
     stop_event: asyncio.Event,
     dry_run: bool,
     timeframe: str,
+    freshness_mode: str = "warn",
+    freshness_thresholds: Optional[dict[str, int]] = None,
     on_candidate=None,
 ) -> None:
     logger.info("Starting engine tick loop every %ds", tick_interval_s)
@@ -565,9 +633,12 @@ async def engine_tick_loop(
                 alert_manager=alert_manager,
                 store=store,
                 telegram=telegram,
+                telegram_queue=telegram_queue,
                 coins=coins,
                 dry_run=dry_run,
                 timeframe=timeframe,
+                freshness_mode=freshness_mode,
+                freshness_thresholds=freshness_thresholds,
                 on_candidate=on_candidate,
             )
         except Exception as exc:
@@ -584,11 +655,14 @@ async def signal_refresh_loop(
     alert_manager: AlertManager,
     store: SQLiteDataStore,
     telegram: Optional[TelegramBot],
-    refresh_queue: asyncio.Queue[str],
+    telegram_queue: Optional[asyncio.Queue[tuple[str, str]]],
+    refresh_coordinator,
     debounce_seconds: float,
     stop_event: asyncio.Event,
     dry_run: bool,
     timeframe: str,
+    freshness_mode: str = "warn",
+    freshness_thresholds: Optional[dict[str, int]] = None,
     on_candidate=None,
 ) -> None:
     """
@@ -598,24 +672,11 @@ async def signal_refresh_loop(
     not wait for the hourly engine tick. This loop coalesces bursts of updates
     and evaluates only the impacted coins.
     """
-    pending: set[str] = set()
     logger.info("Starting debounced signal refresh loop (debounce=%.1fs)", debounce_seconds)
 
     while not stop_event.is_set():
         try:
-            coin = await asyncio.wait_for(refresh_queue.get(), timeout=0.5)
-            pending.add(coin)
-            deadline = time.monotonic() + debounce_seconds
-            while not stop_event.is_set():
-                timeout = deadline - time.monotonic()
-                if timeout <= 0:
-                    break
-                try:
-                    coin = await asyncio.wait_for(refresh_queue.get(), timeout=timeout)
-                    pending.add(coin)
-                except asyncio.TimeoutError:
-                    break
-
+            pending = await refresh_coordinator.wait_for_batch(stop_event, debounce_seconds)
             if pending:
                 try:
                     await process_signal_candidates(
@@ -623,15 +684,35 @@ async def signal_refresh_loop(
                         alert_manager=alert_manager,
                         store=store,
                         telegram=telegram,
+                        telegram_queue=telegram_queue,
                         coins=sorted(pending),
                         dry_run=dry_run,
                         timeframe=timeframe,
+                        freshness_mode=freshness_mode,
+                        freshness_thresholds=freshness_thresholds,
                         on_candidate=on_candidate,
                     )
                 except Exception as exc:
                     logger.error("signal_refresh_loop error: %s", exc, exc_info=True)
-                finally:
-                    pending.clear()
+        except asyncio.TimeoutError:
+            continue
+
+
+async def telegram_delivery_loop(
+    telegram: Optional[TelegramBot],
+    telegram_queue: Optional[asyncio.Queue[tuple[str, str]]],
+    stop_event: asyncio.Event,
+) -> None:
+    while not stop_event.is_set():
+        try:
+            if telegram is None or telegram_queue is None:
+                await asyncio.wait_for(stop_event.wait(), timeout=0.5)
+                continue
+            message, priority = await asyncio.wait_for(telegram_queue.get(), timeout=0.5)
+            try:
+                await telegram.send_alert(message, priority)
+            except Exception as exc:
+                logger.error("telegram_delivery_loop error: %s", exc, exc_info=True)
         except asyncio.TimeoutError:
             continue
 
@@ -662,6 +743,7 @@ async def health_check_loop(
     start_time: float,
     stop_event: asyncio.Event,
     dry_run: bool,
+    health_provider: Optional[Callable[[], dict]] = None,
 ) -> None:
     try:
         await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
@@ -672,16 +754,21 @@ async def health_check_loop(
         try:
             uptime_s = int(time.time() - start_time)
             counts = store.counts()
+            runtime_snapshot = health_provider() if health_provider else None
             if dry_run or not telegram:
                 logger.info(
-                    "Health check: uptime=%ds alerts=%d counts=%s",
-                    uptime_s, alert_manager.total_alerts, counts,
+                    "Health check: uptime=%ds alerts=%d status=%s counts=%s",
+                    uptime_s,
+                    alert_manager.total_alerts,
+                    runtime_snapshot.get("status") if runtime_snapshot else "unknown",
+                    counts,
                 )
             else:
                 await telegram.send_health_check(
                     uptime_s=uptime_s,
                     total_alerts=alert_manager.total_alerts,
                     data_counts=counts,
+                    runtime_snapshot=runtime_snapshot,
                 )
         except Exception as exc:
             logger.error("health_check_loop error: %s", exc, exc_info=True)
@@ -757,254 +844,27 @@ def cmd_inspect(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 async def main(args: argparse.Namespace) -> None:
-    start_time = time.time()
     dry_run = args.dry_run
 
     setup_logging(args.log_level)
     logger.info("hl-signal-daemon v2 starting (dry_run=%s)", dry_run)
+    from runtime.signal_runtime import SignalRuntime
 
-    load_dotenv()
-
-    global_config = load_global_config(os.path.join("config", "global.yaml"))
-    validate_config(global_config, dry_run)
-    orderbook_config = load_signal_config("config", "orderbook_imbalance")
-    trade_flow_config = load_signal_config("config", "trade_flow_imbalance")
-
-    coins: list[str] = global_config["assets"]
-    runtime_settings = resolve_runtime_settings(global_config)
-    context_poll_s = runtime_settings["context_poll_seconds"]
-    funding_poll_s = runtime_settings["funding_poll_seconds"]
-    bybit_ohlcv_s = runtime_settings["bybit_ohlcv_seconds"]
-    bybit_oi_s = runtime_settings["bybit_oi_seconds"]
-    bybit_vol_s = runtime_settings["bybit_volume_seconds"]
-    tick_s = runtime_settings["tick_interval_seconds"]
-    cooldown_s = runtime_settings["cooldown_seconds"]
-    health_s: int = global_config.get("health_check", {}).get("interval_seconds", 21600)
-    lookback_hours: int = 48
-    orderbook_snapshot_s = int(orderbook_config.get("snapshot_interval_seconds", 30))
-    orderbook_depth_levels = int(orderbook_config.get("depth_levels", 10))
-    orderflow_retention_hours = int(trade_flow_config.get("retention_hours", 48))
-
-    db_path = global_config.get("database", {}).get("path", "data.db")
-
-    # Initialise components
-    hl_client = HLClient()
-    bybit_client = BybitClient(
-        api_key=os.getenv("BYBIT_API_KEY", ""),
-        api_secret=os.getenv("BYBIT_API_SECRET", ""),
-    )
-    store = SQLiteDataStore(db_path=db_path)
-    engine = SignalEngine(config_dir="config", global_config=global_config, store=store)
-    alert_manager = AlertManager(
-        cooldown_seconds=cooldown_s,
-        cadence=runtime_settings["timeframe"],
-    )
-
-    telegram: Optional[TelegramBot] = None
-    if not dry_run:
-        token = os.getenv("TELEGRAM_BOT_TOKEN", "")
-        chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
-        if token and token not in ("not_yet",):
-            telegram = TelegramBot(
-                token=token,
-                chat_id=chat_id,
-                min_interval_seconds=runtime_settings["telegram_min_interval_seconds"],
-            )
-
-    await hl_client.start()
-    await bybit_client.start()
-
-    enabled_signals = [s.name for s in engine._signals]
-    if telegram:
-        await telegram.send_startup_message(assets=coins, signals=enabled_signals)
-    logger.info("Daemon online — assets=%s signals=%s db=%s", coins, enabled_signals, db_path)
-
-    stop_event = asyncio.Event()
-    signal_refresh_queue: Optional[asyncio.Queue[str]] = None
-    if runtime_settings["signal_refresh_enabled"]:
-        signal_refresh_queue = asyncio.Queue(maxsize=1000)
+    runtime = SignalRuntime(backend_root=os.path.dirname(__file__), dry_run=dry_run)
 
     def _handle_shutdown(sig: int, frame) -> None:
         logger.info("Received signal %s — initiating graceful shutdown", sig)
-        stop_event.set()
+        runtime.stop_event.set()
 
     signal.signal(signal.SIGINT, _handle_shutdown)
     signal.signal(signal.SIGTERM, _handle_shutdown)
 
-    def _enqueue_signal_refresh(coin: str) -> None:
-        if signal_refresh_queue is None:
-            return
-        try:
-            signal_refresh_queue.put_nowait(coin)
-        except asyncio.QueueFull:
-            logger.debug("Signal refresh queue full; dropping update for %s", coin)
-
-    tasks = [
-        # HL data
-        asyncio.create_task(
-            poll_asset_contexts(
-                hl_client,
-                store,
-                coins,
-                context_poll_s,
-                stop_event,
-                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
-            ),
-            name="poll_hl_context",
-        ),
-        asyncio.create_task(
-            poll_funding_history(
-                hl_client,
-                store,
-                coins,
-                funding_poll_s,
-                lookback_hours,
-                stop_event,
-                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
-            ),
-            name="poll_hl_funding",
-        ),
-        asyncio.create_task(
-            run_trades_ws(hl_client, store, coins, stop_event, on_update=_enqueue_signal_refresh if signal_refresh_queue else None),
-            name="ws_trades",
-        ),
-        asyncio.create_task(
-            run_l2book_ws(
-                hl_client,
-                store,
-                coins,
-                stop_event,
-                snapshot_interval_s=orderbook_snapshot_s,
-                depth_levels=orderbook_depth_levels,
-                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
-            ),
-            name="ws_l2book",
-        ),
-        asyncio.create_task(
-            run_liquidations_ws(hl_client, store, stop_event, on_update=_enqueue_signal_refresh if signal_refresh_queue else None),
-            name="ws_liquidations",
-        ),
-        # Bybit REST pollers
-        asyncio.create_task(
-            poll_hl_ohlcv(
-                hl_client,
-                store,
-                coins,
-                bybit_ohlcv_s,
-                stop_event,
-                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
-            ),
-            name="poll_hl_ohlcv",
-        ),
-        asyncio.create_task(
-            poll_bybit_oi(
-                bybit_client,
-                store,
-                coins,
-                bybit_oi_s,
-                stop_event,
-                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
-            ),
-            name="poll_bybit_oi",
-        ),
-        asyncio.create_task(
-            poll_bybit_volume(
-                bybit_client,
-                store,
-                coins,
-                bybit_vol_s,
-                stop_event,
-                on_update=_enqueue_signal_refresh if signal_refresh_queue else None,
-            ),
-            name="poll_bybit_volume",
-        ),
-        # Engine
-        asyncio.create_task(
-            engine_tick_loop(
-                engine,
-                alert_manager,
-                store,
-                telegram,
-                coins,
-                tick_s,
-                stop_event,
-                dry_run,
-                runtime_settings["timeframe"],
-            ),
-            name="engine_tick",
-        ),
-        *(
-            [
-                asyncio.create_task(
-                    signal_refresh_loop(
-                        engine,
-                        alert_manager,
-                        store,
-                        telegram,
-                        signal_refresh_queue,
-                        runtime_settings["signal_refresh_debounce_seconds"],
-                        stop_event,
-                        dry_run,
-                        runtime_settings["timeframe"],
-                        on_candidate=None,
-                    ),
-                    name="signal_refresh",
-                )
-            ]
-            if signal_refresh_queue is not None
-            else []
-        ),
-        # Diagnostics
-        asyncio.create_task(
-            log_data_counts(store, 60, stop_event),
-            name="log_counts",
-        ),
-        asyncio.create_task(
-            health_check_loop(telegram, alert_manager, store, health_s, start_time, stop_event, dry_run),
-            name="health_check",
-        ),
-        asyncio.create_task(
-            prune_ticks_loop(store, orderflow_retention_hours, 3600, stop_event),
-            name="prune_orderflow_ticks",
-        ),
-    ]
-
-    def _task_done_callback(task: asyncio.Task) -> None:
-        if not task.cancelled() and task.exception() is not None:
-            logger.error("Task %s raised: %s", task.get_name(), task.exception())
-
-    for task in tasks:
-        task.add_done_callback(_task_done_callback)
-
     try:
-        await asyncio.gather(*tasks)
-    except asyncio.CancelledError:
-        pass
-    except Exception as exc:
-        logger.error("Unhandled exception in gather: %s", exc, exc_info=True)
+        await runtime.start()
+        await runtime.stop_event.wait()
     finally:
         logger.info("Shutting down...")
-        for task in tasks:
-            task.cancel()
-
-        try:
-            await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=10.0,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("Shutdown timeout — forcing exit")
-
-        await hl_client.close()
-        await bybit_client.close()
-        store.close()
-
-        if telegram:
-            try:
-                await telegram.send_shutdown_message()
-            except Exception:
-                pass
-
+        await runtime.stop()
         logger.info("hl-signal-daemon stopped")
 
 

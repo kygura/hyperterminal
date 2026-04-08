@@ -1,6 +1,8 @@
 import aiohttp
 import json
+import asyncio
 from typing import Optional, List, Dict, Any
+import random
 from loguru import logger
 from .models import Position, Order, UserState, PositionSide, OrderSide
 
@@ -16,7 +18,7 @@ class HyperliquidClient:
         self.session: Optional[aiohttp.ClientSession] = None
         
     async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
+        self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15, connect=5, sock_read=10))
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -26,15 +28,37 @@ class HyperliquidClient:
     async def _post(self, url: str, data: dict) -> dict:
         """Make POST request to API"""
         if not self.session:
-            self.session = aiohttp.ClientSession()
-            
-        try:
-            async with self.session.post(url, json=data) as response:
-                response.raise_for_status()
-                return await response.json()
-        except aiohttp.ClientError as e:
-            logger.error(f"API request failed: {e}")
-            raise
+            self.session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15, connect=5, sock_read=10))
+
+        retryable_statuses = {408, 429, 500, 502, 503, 504}
+        last_error: Optional[Exception] = None
+        for attempt in range(1, 4):
+            try:
+                async with self.session.post(url, json=data) as response:
+                    if response.status in retryable_statuses and attempt < 3:
+                        retry_after = response.headers.get("Retry-After")
+                        delay = float(retry_after) if retry_after else (0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25))
+                        await asyncio.sleep(delay)
+                        continue
+                    response.raise_for_status()
+                    return await response.json()
+            except aiohttp.ClientResponseError as e:
+                last_error = e
+                if e.status in retryable_statuses and attempt < 3:
+                    await asyncio.sleep(0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25))
+                    continue
+                logger.error(f"API request failed: {e}")
+                raise
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last_error = e
+                if attempt < 3:
+                    await asyncio.sleep(0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25))
+                    continue
+                logger.error(f"API request failed: {e}")
+                raise
+        if last_error:
+            raise last_error
+        raise RuntimeError("API request failed")
     
     async def get_user_state(self, address: str) -> Optional[UserState]:
         """

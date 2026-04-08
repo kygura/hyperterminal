@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import math
+import random
 import time
 from typing import Any, Callable, Optional
 
@@ -29,6 +30,7 @@ class HLClient:
 
     def __init__(self) -> None:
         self._session: Optional[aiohttp.ClientSession] = None
+        self._ws_status: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -40,7 +42,7 @@ class HLClient:
         self._session = aiohttp.ClientSession(
             connector=connector,
             headers=_HEADERS,
-            timeout=aiohttp.ClientTimeout(total=30),
+            timeout=aiohttp.ClientTimeout(total=15, connect=5, sock_read=10),
         )
         logger.info("HLClient HTTP session started")
 
@@ -58,19 +60,38 @@ class HLClient:
         if self._session is None or self._session.closed:
             logger.error("HLClient: session not started or already closed")
             return None
-        try:
-            async with self._session.post(_BASE_HTTP, json=payload) as resp:
-                resp.raise_for_status()
-                return await resp.json()
-        except aiohttp.ClientResponseError as exc:
-            logger.error("HLClient HTTP %s for payload %s: %s", exc.status, payload.get("type"), exc)
-            return None
-        except aiohttp.ClientError as exc:
-            logger.error("HLClient network error for payload %s: %s", payload.get("type"), exc)
-            return None
-        except Exception as exc:
-            logger.error("HLClient unexpected error for payload %s: %s", payload.get("type"), exc, exc_info=True)
-            return None
+        retryable_statuses = {408, 429, 500, 502, 503, 504}
+        for attempt in range(1, 4):
+            try:
+                async with self._session.post(_BASE_HTTP, json=payload) as resp:
+                    if resp.status in retryable_statuses and attempt < 3:
+                        retry_after = resp.headers.get("Retry-After")
+                        delay = float(retry_after) if retry_after else (0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25))
+                        logger.warning("HLClient retryable HTTP %s for payload %s (attempt %d/3)", resp.status, payload.get("type"), attempt)
+                        await asyncio.sleep(delay)
+                        continue
+                    resp.raise_for_status()
+                    return await resp.json()
+            except aiohttp.ClientResponseError as exc:
+                if exc.status in retryable_statuses and attempt < 3:
+                    delay = 0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25)
+                    logger.warning("HLClient retryable HTTP %s for payload %s (attempt %d/3)", exc.status, payload.get("type"), attempt)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error("HLClient HTTP %s for payload %s: %s", exc.status, payload.get("type"), exc)
+                return None
+            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                if attempt < 3:
+                    delay = 0.5 * (2 ** (attempt - 1)) + random.uniform(0.0, 0.25)
+                    logger.warning("HLClient transient error for payload %s (attempt %d/3): %s", payload.get("type"), attempt, exc)
+                    await asyncio.sleep(delay)
+                    continue
+                logger.error("HLClient network error for payload %s: %s", payload.get("type"), exc)
+                return None
+            except Exception as exc:
+                logger.error("HLClient unexpected error for payload %s: %s", payload.get("type"), exc, exc_info=True)
+                return None
+        return None
 
     # ------------------------------------------------------------------
     # REST methods
@@ -209,12 +230,17 @@ class HLClient:
 
         while not stop_event.is_set():
             try:
+                status = self._ws_status.setdefault(name, {"status": "connecting", "reconnects": 0, "last_error": None, "last_message_at": None})
+                status["status"] = "connecting"
                 logger.info("HLClient[%s]: connecting to WebSocket", name)
                 async with aiohttp.ClientSession() as ws_session:
                     async with ws_session.ws_connect(_BASE_WS, heartbeat=30) as ws:
                         logger.info("HLClient[%s]: WebSocket connected", name)
                         backoff = 1.0
                         consecutive_failures = 0
+                        status["status"] = "running"
+                        status["reconnects"] += 1
+                        status["last_error"] = None
 
                         # Send subscriptions
                         for msg in subscribe_msgs:
@@ -226,6 +252,7 @@ class HLClient:
                             if raw_msg.type == aiohttp.WSMsgType.TEXT:
                                 try:
                                     data = json.loads(raw_msg.data)
+                                    status["last_message_at"] = time.time()
                                     message_handler(data)
                                 except json.JSONDecodeError as exc:
                                     logger.debug("HLClient[%s]: JSON parse error: %s", name, exc)
@@ -237,6 +264,9 @@ class HLClient:
 
             except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
                 consecutive_failures += 1
+                status = self._ws_status.setdefault(name, {"status": "failed", "reconnects": 0, "last_error": None, "last_message_at": None})
+                status["status"] = "failed"
+                status["last_error"] = str(exc)
                 logger.warning(
                     "HLClient[%s]: WS disconnected (#%d): %s",
                     name, consecutive_failures, exc,
@@ -248,6 +278,9 @@ class HLClient:
                     )
             except Exception as exc:
                 consecutive_failures += 1
+                status = self._ws_status.setdefault(name, {"status": "failed", "reconnects": 0, "last_error": None, "last_message_at": None})
+                status["status"] = "failed"
+                status["last_error"] = str(exc)
                 logger.error("HLClient[%s]: unexpected WS error: %s", name, exc, exc_info=True)
 
             if stop_event.is_set():
@@ -262,6 +295,11 @@ class HLClient:
             backoff = min(backoff * 2, max_backoff)
 
         logger.info("HLClient[%s]: WebSocket task stopped", name)
+        if name in self._ws_status:
+            self._ws_status[name]["status"] = "stopped"
+
+    def connection_snapshot(self) -> dict[str, dict]:
+        return {name: dict(status) for name, status in self._ws_status.items()}
 
     async def connect_trades_ws(
         self,
