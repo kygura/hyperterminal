@@ -544,7 +544,9 @@ async def process_signal_candidates(
 
     # Filter by conviction floor if set
     if min_conviction is not None:
-        floor = _CONVICTION_RANK.get(min_conviction, 0)
+        if min_conviction not in _CONVICTION_RANK:
+            raise ValueError(f"Unknown min_conviction: {min_conviction!r}")
+        floor = _CONVICTION_RANK[min_conviction]
         suppressed = [c for c in candidates if _CONVICTION_RANK.get(c.conviction, 0) < floor]
         candidates = [c for c in candidates if _CONVICTION_RANK.get(c.conviction, 0) >= floor]
         if suppressed:
