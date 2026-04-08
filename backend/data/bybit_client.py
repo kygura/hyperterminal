@@ -9,6 +9,7 @@ Docs: https://bybit-exchange.github.io/docs/v5/intro
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import logging
@@ -21,6 +22,8 @@ import aiohttp
 logger = logging.getLogger(__name__)
 
 _BASE_URL = "https://api.bybit.com"
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 1.0
 
 
 class BybitClient:
@@ -65,34 +68,55 @@ class BybitClient:
             logger.error("BybitClient: session not started")
             return None
         url = _BASE_URL + path
-        headers = {}
-        if auth and self._api_key:
-            ts = int(time.time() * 1000)
-            params = dict(params)
-            sig = self._sign(params, ts)
-            headers = {
-                "X-BAPI-API-KEY": self._api_key,
-                "X-BAPI-TIMESTAMP": str(ts),
-                "X-BAPI-RECV-WINDOW": "5000",
-                "X-BAPI-SIGN": sig,
-            }
-        try:
-            async with self._session.get(url, params=params, headers=headers) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-                if data.get("retCode", 0) != 0:
-                    logger.warning(
-                        "Bybit API error %s: %s (path=%s params=%s)",
-                        data.get("retCode"), data.get("retMsg"), path, params,
-                    )
+
+        for attempt in range(_MAX_RETRIES + 1):
+            headers = {}
+            if auth and self._api_key:
+                ts = int(time.time() * 1000)
+                req_params = dict(params)
+                sig = self._sign(req_params, ts)
+                headers = {
+                    "X-BAPI-API-KEY": self._api_key,
+                    "X-BAPI-TIMESTAMP": str(ts),
+                    "X-BAPI-RECV-WINDOW": "5000",
+                    "X-BAPI-SIGN": sig,
+                }
+            else:
+                req_params = params
+            try:
+                async with self._session.get(url, params=req_params, headers=headers) as resp:
+                    resp.raise_for_status()
+                    data = await resp.json()
+                    if data.get("retCode", 0) != 0:
+                        logger.warning(
+                            "Bybit API error %s: %s (path=%s params=%s)",
+                            data.get("retCode"), data.get("retMsg"), path, params,
+                        )
+                        return None  # logic error, don't retry
+                    return data.get("result")
+            except aiohttp.ClientResponseError as exc:
+                if exc.status < 500 or attempt >= _MAX_RETRIES:
+                    logger.error("BybitClient HTTP %s for %s: %s", exc.status, path, exc)
                     return None
-                return data.get("result")
-        except aiohttp.ClientResponseError as exc:
-            logger.error("BybitClient HTTP %s for %s: %s", exc.status, path, exc)
-        except aiohttp.ClientError as exc:
-            logger.error("BybitClient network error for %s: %s", path, exc)
-        except Exception as exc:
-            logger.error("BybitClient unexpected error for %s: %s", path, exc, exc_info=True)
+                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "BybitClient HTTP %d, retrying in %.1fs (attempt %d/%d): %s",
+                    exc.status, delay, attempt + 1, _MAX_RETRIES, path,
+                )
+                await asyncio.sleep(delay)
+            except aiohttp.ClientError as exc:
+                if attempt >= _MAX_RETRIES:
+                    logger.error("BybitClient network error for %s: %s", path, exc)
+                    return None
+                delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                logger.warning(
+                    "BybitClient network error, retrying in %.1fs (attempt %d/%d): %s %s",
+                    delay, attempt + 1, _MAX_RETRIES, path, exc,
+                )
+                await asyncio.sleep(delay)
+            except Exception as exc:
+                logger.error("BybitClient unexpected error for %s: %s", path, exc, exc_info=True)
+                return None
         return None
 
     # ------------------------------------------------------------------
