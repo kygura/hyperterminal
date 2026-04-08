@@ -263,25 +263,35 @@ async def poll_funding_history(
     on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
     logger.info("Starting HL funding history polling every %ds", interval_s)
+
+    async def _poll_funding_one(coin: str, start_ms: int) -> None:
+        try:
+            entries = await client.get_funding_history(coin, start_ms)
+            if entries:
+                for entry in entries:
+                    store.add_funding(
+                        coin=coin,
+                        rate=entry["fundingRate"],
+                        premium=entry["premium"],
+                        ts=entry["time"],
+                        source="hyperliquid",
+                    )
+                if on_update is not None:
+                    on_update(coin)
+        except Exception as exc:
+            logger.error("poll_funding_history error for %s: %s", coin, exc, exc_info=True)
+
     while not stop_event.is_set():
         now_ms = int(time.time() * 1000)
         start_ms = now_ms - lookback_hours * 3600 * 1000
-        for coin in coins:
-            try:
-                entries = await client.get_funding_history(coin, start_ms)
-                if entries:
-                    for entry in entries:
-                        store.add_funding(
-                            coin=coin,
-                            rate=entry["fundingRate"],
-                            premium=entry["premium"],
-                            ts=entry["time"],
-                            source="hyperliquid",
-                        )
-                    if on_update is not None:
-                        on_update(coin)
-            except Exception as exc:
-                logger.error("poll_funding_history error for %s: %s", coin, exc, exc_info=True)
+
+        results = await asyncio.gather(
+            *[_poll_funding_one(coin, start_ms) for coin in coins],
+            return_exceptions=True,
+        )
+        for coin, result in zip(coins, results):
+            if isinstance(result, BaseException):
+                logger.error("Unexpected error polling %s: %s", coin, result, exc_info=result)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
@@ -382,32 +392,42 @@ async def poll_hl_ohlcv(
 ) -> None:
     """Poll hourly OHLCV candles from Hyperliquid every interval_s seconds."""
     logger.info("Starting HL OHLCV polling every %ds", interval_s)
+
+    async def _poll_ohlcv_one(coin: str, start_ms: int) -> None:
+        try:
+            # '1h' interval
+            candles = await client.get_candle_snapshot(coin, "1h", start_ms)
+            if candles:
+                for c in candles:
+                    store.add_ohlcv(
+                        asset=coin,
+                        ts=c["ts"],
+                        open_=c["open"],
+                        high=c["high"],
+                        low=c["low"],
+                        close=c["close"],
+                        volume=c["volume"],
+                        source="hyperliquid",
+                        timeframe="1h",
+                    )
+                logger.debug("HL OHLCV: %d candles for %s", len(candles), coin)
+                if on_update is not None:
+                    on_update(coin)
+        except Exception as exc:
+            logger.error("poll_hl_ohlcv error for %s: %s", coin, exc, exc_info=True)
+
     # Start looking back 50 hours minimum
     while not stop_event.is_set():
         now_ms = int(time.time() * 1000)
         start_ms = now_ms - (50 * 3600 * 1000)
-        for coin in coins:
-            try:
-                # '1h' interval
-                candles = await client.get_candle_snapshot(coin, "1h", start_ms)
-                if candles:
-                    for c in candles:
-                        store.add_ohlcv(
-                            asset=coin,
-                            ts=c["ts"],
-                            open_=c["open"],
-                            high=c["high"],
-                            low=c["low"],
-                            close=c["close"],
-                            volume=c["volume"],
-                            source="hyperliquid",
-                            timeframe="1h",
-                        )
-                    logger.debug("HL OHLCV: %d candles for %s", len(candles), coin)
-                    if on_update is not None:
-                        on_update(coin)
-            except Exception as exc:
-                logger.error("poll_hl_ohlcv error for %s: %s", coin, exc, exc_info=True)
+
+        results = await asyncio.gather(
+            *[_poll_ohlcv_one(coin, start_ms) for coin in coins],
+            return_exceptions=True,
+        )
+        for coin, result in zip(coins, results):
+            if isinstance(result, BaseException):
+                logger.error("Unexpected error polling %s: %s", coin, result, exc_info=result)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
@@ -429,18 +449,27 @@ async def poll_bybit_oi(
     via metaAndAssetCtxs.
     """
     logger.info("Starting Bybit OI polling (fallback) every %ds", interval_s)
-    while not stop_event.is_set():
-        for coin in coins:
+
+    async def _poll_oi_one(coin: str) -> None:
+        try:
             symbol = BybitClient.asset_to_symbol(coin)
-            try:
-                readings = await bybit.get_open_interest(symbol, interval_time="1h", limit=50)
-                for r in readings:
-                    store.add_oi(coin=coin, oi=r["oi"], ts=r["ts"], source="bybit")
-                logger.debug("Bybit OI: %d readings for %s", len(readings), coin)
-                if readings and on_update is not None:
-                    on_update(coin)
-            except Exception as exc:
-                logger.error("poll_bybit_oi error for %s: %s", coin, exc, exc_info=True)
+            readings = await bybit.get_open_interest(symbol, interval_time="1h", limit=50)
+            for r in readings:
+                store.add_oi(coin=coin, oi=r["oi"], ts=r["ts"], source="bybit")
+            logger.debug("Bybit OI: %d readings for %s", len(readings), coin)
+            if readings and on_update is not None:
+                on_update(coin)
+        except Exception as exc:
+            logger.error("poll_bybit_oi error for %s: %s", coin, exc, exc_info=True)
+
+    while not stop_event.is_set():
+        results = await asyncio.gather(
+            *[_poll_oi_one(coin) for coin in coins],
+            return_exceptions=True,
+        )
+        for coin, result in zip(coins, results):
+            if isinstance(result, BaseException):
+                logger.error("Unexpected error polling %s: %s", coin, result, exc_info=result)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
@@ -458,25 +487,34 @@ async def poll_bybit_volume(
 ) -> None:
     """Poll spot volume from Bybit every interval_s seconds."""
     logger.info("Starting Bybit volume polling every %ds", interval_s)
-    while not stop_event.is_set():
-        for coin in coins:
+
+    async def _poll_volume_one(coin: str) -> None:
+        try:
             symbol = BybitClient.asset_to_symbol(coin, category="spot")
-            try:
-                spot_candles = await bybit.get_spot_volume(symbol, interval="60", limit=50)
-                for c in spot_candles:
-                    turnover = c.get("turnover", c["volume"])
-                    store.add_volume_snapshot(
-                        coin=coin,
-                        ts=c["ts"],
-                        futures_volume=0.0,
-                        spot_volume=turnover,
-                        source="bybit_spot",
-                    )
-                logger.debug("Bybit spot vol: %d entries for %s", len(spot_candles), coin)
-                if spot_candles and on_update is not None:
-                    on_update(coin)
-            except Exception as exc:
-                logger.error("poll_bybit_volume error for %s: %s", coin, exc, exc_info=True)
+            spot_candles = await bybit.get_spot_volume(symbol, interval="60", limit=50)
+            for c in spot_candles:
+                turnover = c.get("turnover", c["volume"])
+                store.add_volume_snapshot(
+                    coin=coin,
+                    ts=c["ts"],
+                    futures_volume=0.0,
+                    spot_volume=turnover,
+                    source="bybit_spot",
+                )
+            logger.debug("Bybit spot vol: %d entries for %s", len(spot_candles), coin)
+            if spot_candles and on_update is not None:
+                on_update(coin)
+        except Exception as exc:
+            logger.error("poll_bybit_volume error for %s: %s", coin, exc, exc_info=True)
+
+    while not stop_event.is_set():
+        results = await asyncio.gather(
+            *[_poll_volume_one(coin) for coin in coins],
+            return_exceptions=True,
+        )
+        for coin, result in zip(coins, results):
+            if isinstance(result, BaseException):
+                logger.error("Unexpected error polling %s: %s", coin, result, exc_info=result)
 
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
