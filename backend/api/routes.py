@@ -59,6 +59,36 @@ class WalletResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+def _normalized_trade_number(value) -> float:
+    return round(float(value or 0), 12)
+
+
+def _stored_trade_signature(trade: Trade) -> tuple:
+    trade_time_ms = int(trade.timestamp.timestamp() * 1000) if trade.timestamp else 0
+    return (
+        trade.symbol,
+        trade.side,
+        _normalized_trade_number(trade.size),
+        _normalized_trade_number(trade.price),
+        _normalized_trade_number(trade.realized_pnl),
+        _normalized_trade_number(trade.fee),
+        trade_time_ms,
+    )
+
+
+def _fill_trade_signature(fill: dict) -> tuple:
+    side = "LONG" if fill.get("side") == "B" else "SHORT"
+    return (
+        fill.get("coin"),
+        side,
+        _normalized_trade_number(fill.get("sz", 0)),
+        _normalized_trade_number(fill.get("px", 0)),
+        _normalized_trade_number(fill.get("closedPnl", 0)),
+        _normalized_trade_number(fill.get("fee", 0)),
+        int(fill.get("time", 0) or 0),
+    )
+
 async def calculate_pnl_metrics(wallet: Wallet, session: Session) -> WalletMetrics:
     # Get latest snapshot (current state)
     latest = session.exec(
@@ -203,11 +233,7 @@ async def sync_historical_trades(address: str):
         with Session(engine) as session:
             # Get existing signatures to avoid duplicates
             current_trades = session.exec(select(Trade).where(Trade.wallet_address == address)).all()
-            # Signature: symbol + side + size + price (timestamp is tricky due to ms precision mismatch potentially)
-            # Actually timestamp from HL is ms.
-            existing_sigs = set()
-            for t in current_trades:
-                existing_sigs.add((t.symbol, t.side, t.size, t.price))
+            existing_sigs = {_stored_trade_signature(t) for t in current_trades}
                 
             count = 0
             for fill in fills:
@@ -215,10 +241,11 @@ async def sync_historical_trades(address: str):
                  price = float(fill.get("px", 0))
                  size = float(fill.get("sz", 0))
                  side = "LONG" if fill.get("side") == "B" else "SHORT"
-                 
-                 if (symbol, side, size, price) in existing_sigs:
+                 signature = _fill_trade_signature(fill)
+                  
+                 if signature in existing_sigs:
                      continue
-                     
+                      
                  # Create Trade
                  trade = Trade(
                      wallet_address=address,
@@ -232,6 +259,7 @@ async def sync_historical_trades(address: str):
                      timestamp=datetime.fromtimestamp(fill.get("time", 0)/1000)
                  )
                  session.add(trade)
+                 existing_sigs.add(signature)
                  count += 1
             
             if count > 0:
@@ -314,22 +342,7 @@ async def read_wallets(session: Session = Depends(get_session)):
     for w in wallets:
         metrics = await calculate_pnl_metrics(w, session)
         perf = calculate_performance(w, session)
-        
-        # Determine if we should trigger sync (e.g. if no trades but has snapshot/balance)
-        # For simplicity, if totalTrades == 0, trigger sync in background
-        if perf.totalTrades == 0 and w.is_active:
-            # We can't await here easily without slowing down list.
-            # Use background task concept? FastAPI BackgroundTasks not injected here.
-            # Use asyncio.create_task helper
-            # But we don't want to spam it on every refresh.
-            # check if we already tried? 
-            # Let's rely on create_wallet for now, or assume watcher picks up new ones.
-            # For EXISTING wallets (before this update), they won't have trades.
-            # We should probably run a migration script or just trigger once.
-            # I'll invoke it if trades are 0, but maybe rate limit it?
-            # It's async, so it's fine.
-            asyncio.create_task(sync_historical_trades(w.address))
-        
+
         # Ensure config exists (lazy load or just handle potential None)
         # If None, maybe we should create one or just return None (frontend handles default)
         cfg = w.copy_config
@@ -451,6 +464,9 @@ async def place_manual_order(
     This uses the executor which is configured with agent credentials.
     """
     from engine.executor import Executor
+
+    if leverage < 1:
+        raise HTTPException(status_code=422, detail="leverage must be at least 1x")
     
     # Convert side to boolean (is_buy)
     is_buy = (side.upper() == "LONG")
@@ -466,8 +482,17 @@ async def place_manual_order(
             is_buy=is_buy,
             size=size,
             price=price,
-            order_type=order_type.upper()
+            order_type=order_type.upper(),
+            leverage=leverage,
         )
+
+        if result.get("status") != "ok":
+            logger.error(f"Manual order failed: {result}")
+            return {
+                "success": False,
+                "error": result.get("error", "Order execution failed"),
+                "result": result,
+            }
         
         logger.info(f"Manual order placed: {symbol} {side} {size} @ {price} (leverage: {leverage}x)")
         
@@ -554,11 +579,6 @@ async def approve_pending_trade(address: str, trade_id: int, session: Session = 
     
     if trade.status != "PENDING":
         raise HTTPException(status_code=400, detail="Trade not pending")
-
-    # Mark as approved
-    trade.status = "APPROVED"
-    session.add(trade)
-    session.commit()
     
     # Execute immediately
     from engine.executor import Executor
@@ -567,11 +587,23 @@ async def approve_pending_trade(address: str, trade_id: int, session: Session = 
     # Determine side boolean
     is_buy = (trade.side == "LONG")
     
-    # We might want to re-check risk or just strict execute since user approved
-    # Ideally, we call the execute logic.
-    await executor.execute_order(trade.symbol, is_buy, trade.size, trade.price, "MARKET")
+    result = await executor.execute_order(
+        trade.symbol,
+        is_buy,
+        trade.size,
+        trade.price,
+        "MARKET",
+        leverage=trade.leverage,
+    )
+    if result.get("status") != "ok":
+        raise HTTPException(status_code=502, detail=result.get("error", "Trade execution failed"))
+
+    # Mark as approved only after the execution path succeeds.
+    trade.status = "APPROVED"
+    session.add(trade)
+    session.commit()
     
-    return {"status": "executed"}
+    return {"status": "executed", "result": result}
 
 class PendingTradeUpdate(BaseModel):
     size: Optional[float] = None

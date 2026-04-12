@@ -15,6 +15,37 @@ logger = logging.getLogger(__name__)
 executor = Executor()
 risk_manager = RiskManager()
 
+
+def _coerce_leverage(value, default: int = 1) -> int:
+    """Normalize leverage payloads from fills/positions into a safe integer."""
+    try:
+        if isinstance(value, dict):
+            value = value.get("value", default)
+        leverage = int(float(value))
+        return leverage if leverage >= 1 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _resolve_fill_leverage(address: str, symbol: str, fill: dict, session: Session) -> int:
+    """Prefer explicit fill leverage, otherwise reuse the latest tracked open position leverage."""
+    direct_leverage = fill.get("leverage")
+    if direct_leverage is not None:
+        return _coerce_leverage(direct_leverage)
+
+    tracked_position = session.exec(
+        select(Position)
+        .where(Position.wallet_address == address)
+        .where(Position.symbol == symbol)
+        .where(Position.status == "OPEN")
+        .order_by(Position.updated_at.desc())
+        .limit(1)
+    ).first()
+    if tracked_position:
+        return _coerce_leverage(tracked_position.leverage)
+
+    return 1
+
 async def handle_update(address: str, data: dict):
     if "data" not in data:
         return
@@ -121,7 +152,8 @@ async def _handle_fills(address: str, fills: list, session: Session):
         price = float(fill.get("px", 0))
         size = float(fill.get("sz", 0)) # Target size
         side = fill.get("side") # 'B' or 'S'
-        side_str = "LONG" if side == "B" else "SHORT" 
+        side_str = "LONG" if side == "B" else "SHORT"
+        leverage = _resolve_fill_leverage(address, symbol, fill, session)
         
         type_str = "LIMIT" if fill.get("crossed") else "MARKET"
 
@@ -162,7 +194,7 @@ async def _handle_fills(address: str, fills: list, session: Session):
                  symbol=symbol,
                  side=side_str,
                  size=size, # Store original signal size
-                 leverage=1, # Default or from signal if available
+                 leverage=leverage,
                  price=price,
                  status="PENDING"
              )
@@ -197,12 +229,11 @@ async def _handle_fills(address: str, fills: list, session: Session):
         our_size = our_size * cap
         
         # 5. Risk Check
-        leverage = 1 # Approximation
         if risk_manager.validate_initial_trade(symbol, side_str, our_size, price, leverage, config):
             # 6. Execute
             logger.info(f"Copying trade for {symbol}: {side_str} {our_size}")
             is_buy = (side_str == "LONG")
-            await executor.execute_order(symbol, is_buy, our_size, price, "MARKET")
+            await executor.execute_order(symbol, is_buy, our_size, price, "MARKET", leverage=leverage)
 
 
 async def sync_initial_orders(address: str):

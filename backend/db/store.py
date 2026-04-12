@@ -94,6 +94,19 @@ class SQLiteDataStore:
     def _q1(self, sql: str, params: tuple = ()) -> Optional[sqlite3.Row]:
         return self._conn.execute(sql, params).fetchone()
 
+    def _next_snapshot_ts(self, coin: str, source: str) -> int:
+        """Keep per-source snapshot timestamps monotonic across sub-ms inserts."""
+        ts = int(time.time() * 1000)
+        last = self._q1(
+            """SELECT ts FROM asset_snapshots
+               WHERE asset=? AND source=?
+               ORDER BY ts DESC, id DESC LIMIT 1""",
+            (coin, source),
+        )
+        if last and last["ts"] is not None and ts <= int(last["ts"]):
+            return int(last["ts"]) + 1
+        return ts
+
     # ------------------------------------------------------------------
     # Write: funding
     # ------------------------------------------------------------------
@@ -134,7 +147,7 @@ class SQLiteDataStore:
         for v in (funding, oi, mark_px, oracle_px, premium):
             if not _is_valid_number(v):
                 return
-        ts = int(time.time() * 1000)
+        ts = self._next_snapshot_ts(coin, source)
         self._exec(
             """INSERT INTO asset_snapshots(ts, asset, source, mark_px, oracle_px, funding, oi, premium)
                VALUES(?,?,?,?,?,?,?,?)""",
@@ -392,7 +405,7 @@ class SQLiteDataStore:
         cutoff_ms = int(time.time() * 1000) - lookback_ms
         rows = self._q(
             """SELECT ts, mark_px, oracle_px, funding, oi, premium
-               FROM asset_snapshots WHERE asset=? AND ts>=? ORDER BY ts ASC""",
+               FROM asset_snapshots WHERE asset=? AND ts>=? ORDER BY ts ASC, id ASC""",
             (coin, cutoff_ms),
         )
         return [
@@ -448,14 +461,14 @@ class SQLiteDataStore:
     def get_oi_change(self, coin: str, lookback_ms: int) -> dict:
         cutoff = int(time.time() * 1000) - lookback_ms
         rows = self._q(
-            """SELECT oi FROM open_interest WHERE asset=? AND ts>=? ORDER BY ts ASC LIMIT 2""",
+            """SELECT oi FROM open_interest WHERE asset=? AND ts>=? ORDER BY ts ASC, id ASC LIMIT 2""",
             (coin, cutoff),
         )
         # Also try from asset_snapshots as fallback
         if len(rows) < 2:
             snap_rows = self._q(
                 """SELECT oi FROM asset_snapshots WHERE asset=? AND ts>=? AND oi IS NOT NULL
-                   ORDER BY ts ASC LIMIT 2""",
+                   ORDER BY ts ASC, id ASC LIMIT 2""",
                 (coin, cutoff),
             )
             rows = snap_rows
@@ -464,10 +477,10 @@ class SQLiteDataStore:
         oi_start = rows[0]["oi"]
         # Get last row
         last = self._q1(
-            "SELECT oi FROM open_interest WHERE asset=? AND ts>=? ORDER BY ts DESC LIMIT 1",
+            "SELECT oi FROM open_interest WHERE asset=? AND ts>=? ORDER BY ts DESC, id DESC LIMIT 1",
             (coin, cutoff),
         ) or self._q1(
-            "SELECT oi FROM asset_snapshots WHERE asset=? AND ts>=? AND oi IS NOT NULL ORDER BY ts DESC LIMIT 1",
+            "SELECT oi FROM asset_snapshots WHERE asset=? AND ts>=? AND oi IS NOT NULL ORDER BY ts DESC, id DESC LIMIT 1",
             (coin, cutoff),
         )
         oi_end = last["oi"] if last else oi_start

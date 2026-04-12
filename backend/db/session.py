@@ -19,9 +19,9 @@ if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
     engine = create_engine(connection_string, echo=True, connect_args={"check_same_thread": False})
     print(f"Using Turso database: {db_url}")
 else:
-    # Development: Fall back to local SQLite file
+    # Development: Fall back to the shared local SQLite file
     backend_dir = Path(__file__).parent.parent
-    sqlite_file_name = backend_dir / "database.db"
+    sqlite_file_name = backend_dir / "data.db"
     sqlite_url = f"sqlite:///{sqlite_file_name}"
     connect_args = {"check_same_thread": False}
     engine = create_engine(sqlite_url, echo=True, connect_args=connect_args)

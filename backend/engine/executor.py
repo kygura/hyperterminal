@@ -63,6 +63,37 @@ class Executor:
             self.exchange = None
             self.info = None
 
+    def _not_initialized_result(self) -> Dict[str, Any]:
+        return {
+            "status": "error",
+            "error": "Exchange client is not initialized",
+        }
+
+    async def update_leverage(
+        self,
+        symbol: str,
+        leverage: int,
+        is_cross: bool = True,
+    ) -> Dict[str, Any]:
+        if leverage < 1:
+            return {"status": "error", "error": "Leverage must be at least 1x"}
+
+        if self.exchange is None:
+            logger.error("Cannot update leverage for %s: exchange client is not initialized", symbol)
+            return self._not_initialized_result()
+
+        try:
+            result = self.exchange.update_leverage(leverage, symbol, is_cross=is_cross)
+            if result.get("status") == "ok":
+                margin_mode = "cross" if is_cross else "isolated"
+                logger.info("Updated leverage for %s to %sx (%s)", symbol, leverage, margin_mode)
+            else:
+                logger.error("Leverage update failed for %s: %s", symbol, result)
+            return result
+        except Exception as e:
+            logger.error(f"Failed to update leverage for {symbol}: {e}")
+            return {"status": "error", "error": str(e)}
+
     async def execute_order(
         self, 
         symbol: str, 
@@ -71,7 +102,9 @@ class Executor:
         price: float, 
         order_type: str = "LIMIT",
         reduce_only: bool = False,
-        slippage: float = None
+        slippage: float = None,
+        leverage: Optional[int] = None,
+        is_cross: bool = True,
     ) -> Dict[str, Any]:
         """
         Execute a trade order on Hyperliquid.
@@ -91,6 +124,15 @@ class Executor:
 
         try:
             slippage = slippage or self.DEFAULT_SLIPPAGE
+
+            if self.exchange is None:
+                logger.error("Cannot execute %s order for %s: exchange client is not initialized", order_type, symbol)
+                return self._not_initialized_result()
+
+            if leverage is not None:
+                leverage_result = await self.update_leverage(symbol, leverage, is_cross=is_cross)
+                if leverage_result.get("status") != "ok":
+                    return leverage_result
             
             if order_type.upper() == "MARKET":
                 # Market order using aggressive IoC limit
@@ -111,6 +153,8 @@ class Executor:
                     order_type={"limit": {"tif": "Gtc"}},
                     reduce_only=reduce_only
                 )
+            else:
+                return {"status": "error", "error": f"Unsupported order type: {order_type}"}
             
             # Log the result
             if result.get("status") == "ok":
