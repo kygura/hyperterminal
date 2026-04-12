@@ -455,8 +455,9 @@ class SQLiteDataStore:
         """Average per-bucket spot_volume (from Bybit kline volume) over lookback."""
         cutoff = int(time.time() * 1000) - lookback_ms
         row = self._q1(
-            """SELECT AVG(futures_volume) AS avg_vol, COUNT(*) AS cnt
-               FROM volume_snapshots WHERE asset=? AND ts>=?""",
+            """SELECT AVG(spot_volume) AS avg_vol, COUNT(*) AS cnt
+               FROM volume_snapshots
+               WHERE asset=? AND ts>=? AND spot_volume > 0""",
             (asset, cutoff),
         )
         if not row or row["avg_vol"] is None:
