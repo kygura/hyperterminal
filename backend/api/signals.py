@@ -20,6 +20,13 @@ _CANDIDATES = [
 ]
 
 def _get_db_path() -> Path:
+    configured = os.getenv("SIGNAL_DB_PATH", "").strip()
+    if configured:
+        path = Path(configured)
+        if path.exists():
+            return path
+        raise HTTPException(status_code=503, detail=f"Signal database not found: {path}")
+
     for p in _CANDIDATES:
         if p and p.exists():
             return p

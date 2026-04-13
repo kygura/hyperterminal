@@ -1,5 +1,6 @@
 services:
   frontend:
+    # Local development only. Production frontend deploys to Vercel.
     build:
       context: .
       dockerfile: frontend/Dockerfile
@@ -19,6 +20,7 @@ services:
       - frontend_next:/app/frontend/.next
 
   backend:
+    # Local development only. Production backend uses deploy/docker-compose.prod.yml.
     build:
       context: .
       dockerfile: backend/Dockerfile

@@ -1,0 +1,8 @@
+[Unit]
+Description=Create a compressed SQLite backup for Hypertrade
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/srv/hypertrade/scripts/backup-sqlite.sh

@@ -4,6 +4,8 @@ ENV NEXT_TELEMETRY_DISABLED=1
 
 WORKDIR /app/frontend
 
+# Development-only container. Production frontend deploys to Vercel.
+
 COPY frontend/package.json ./
 RUN npm install --no-fund --no-audit
 

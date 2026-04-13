@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the Hypertrade SQLite backup every night
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+Persistent=true
+Unit=hypertrade-backup.service
+
+[Install]
+WantedBy=timers.target

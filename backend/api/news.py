@@ -4,32 +4,21 @@ Polls configured RSS feeds, classifies articles with Claude Haiku, stores in SQL
 """
 import json
 import sqlite3
-import os
 import asyncio
 import hashlib
 import logging
-from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 from fastapi import APIRouter, Query, HTTPException, BackgroundTasks
 from pydantic import BaseModel
+from db.paths import resolve_path_from_env
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/news", tags=["news"])
 
-# --- Database setup ---
-
-_DB_PATH = Path(os.getenv("NEWS_DB_PATH", "")) or Path(__file__).resolve().parent.parent / "data.db"
-
 def _news_conn() -> sqlite3.Connection:
-    candidates = [
-        Path(os.getenv("NEWS_DB_PATH", "")),
-        Path(__file__).resolve().parent.parent / "data.db",
-    ]
-    db = next((p for p in candidates if str(p) and p.is_file()), None)
-    if not db:
-        # Create in the repo root
-        db = Path(__file__).resolve().parent.parent / "data.db"
+    db = resolve_path_from_env("NEWS_DB_PATH")
+    db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db), check_same_thread=False, timeout=5)
     conn.row_factory = sqlite3.Row
     return conn
