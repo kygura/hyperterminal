@@ -21,10 +21,10 @@ from main_daemon import (
     load_signal_config,
     log_data_counts,
     poll_asset_contexts,
+    poll_bybit_ohlcv,
     poll_bybit_oi,
     poll_bybit_volume,
     poll_funding_history,
-    poll_hl_ohlcv,
     prune_ticks_loop,
     resolve_runtime_settings,
     run_l2book_ws,
@@ -180,15 +180,15 @@ class SignalRuntime:
         self.supervisor.add(TaskSpec("ws_liquidations", lambda: run_liquidations_ws(
             self.hl_client, self.store, self.stop_event, on_update=on_update
         ), critical=False))
-        self.supervisor.add(TaskSpec("poll_hl_ohlcv", lambda: poll_hl_ohlcv(
-            self.hl_client, self.store, self.coins, self.runtime_settings["bybit_ohlcv_seconds"], self.stop_event, on_update=on_update
+        self.supervisor.add(TaskSpec("poll_bybit_ohlcv", lambda: poll_bybit_ohlcv(
+            self.bybit_client, self.store, self.coins, self.runtime_settings["bybit_ohlcv_seconds"], self.stop_event, on_update=on_update
         ), critical=True))
         self.supervisor.add(TaskSpec("poll_bybit_oi", lambda: poll_bybit_oi(
             self.bybit_client, self.store, self.coins, self.runtime_settings["bybit_oi_seconds"], self.stop_event, on_update=on_update
-        ), critical=False))
+        ), critical=True))
         self.supervisor.add(TaskSpec("poll_bybit_volume", lambda: poll_bybit_volume(
             self.bybit_client, self.store, self.coins, self.runtime_settings["bybit_volume_seconds"], self.stop_event, on_update=on_update
-        ), critical=False))
+        ), critical=True))
         self.supervisor.add(TaskSpec("engine_tick", lambda: engine_tick_loop(
             self.engine, self.alert_manager, self.store, self.telegram, self.telegram_queue,
             self.coins, self.runtime_settings["tick_interval_seconds"], self.stop_event,

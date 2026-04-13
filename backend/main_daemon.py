@@ -3,7 +3,7 @@ hl-signal-daemon — main entry point (v2).
 
 Data sources:
   - Hyperliquid REST (funding history, asset snapshots) + WebSocket (live trades, liquidations)
-  - Bybit REST (OHLCV 1h candles, open interest, spot volume) — scheduled hourly
+  - Bybit REST (OHLCV 1h candles, open interest, spot volume) as the primary bulk context hydrator
 
 Signal modules:
   - FundingExtremesSignal, OIVolumeDivergenceSignal, CVDDivergenceSignal, PremiumExtremesSignal
@@ -418,7 +418,7 @@ async def prune_ticks_loop(
 
 
 # ---------------------------------------------------------------------------
-# Background tasks — Bybit REST
+# Background tasks — Context hydration
 # ---------------------------------------------------------------------------
 
 async def poll_hl_ohlcv(
@@ -429,8 +429,8 @@ async def poll_hl_ohlcv(
     stop_event: asyncio.Event,
     on_update: Optional[Callable[[str], None]] = None,
 ) -> None:
-    """Poll hourly OHLCV candles from Hyperliquid every interval_s seconds."""
-    logger.info("Starting HL OHLCV polling every %ds", interval_s)
+    """Optional fallback OHLCV polling from Hyperliquid."""
+    logger.info("Starting fallback HL OHLCV polling every %ds", interval_s)
 
     async def _poll_ohlcv_one(coin: str, start_ms: int) -> None:
         try:
@@ -473,6 +473,55 @@ async def poll_hl_ohlcv(
             pass
 
 
+async def poll_bybit_ohlcv(
+    bybit: BybitClient,
+    store: SQLiteDataStore,
+    coins: list[str],
+    interval_s: int,
+    stop_event: asyncio.Event,
+    on_update: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Poll hourly OHLCV candles from Bybit as the primary context hydrator."""
+    logger.info("Starting Bybit OHLCV polling every %ds", interval_s)
+
+    async def _poll_ohlcv_one(coin: str) -> None:
+        symbol = BybitClient.asset_to_symbol(coin)
+        try:
+            candles = await bybit.get_klines(symbol, interval="60", limit=50)
+            if candles:
+                for candle in candles:
+                    store.add_ohlcv(
+                        asset=coin,
+                        ts=candle["ts"],
+                        open_=candle["open"],
+                        high=candle["high"],
+                        low=candle["low"],
+                        close=candle["close"],
+                        volume=candle["volume"],
+                        source="bybit",
+                        timeframe="1h",
+                    )
+                logger.debug("Bybit OHLCV: %d candles for %s", len(candles), coin)
+                if on_update is not None:
+                    on_update(coin)
+        except Exception as exc:
+            logger.error("poll_bybit_ohlcv error for %s: %s", coin, exc, exc_info=True)
+
+    while not stop_event.is_set():
+        results = await asyncio.gather(
+            *[_poll_ohlcv_one(coin) for coin in coins],
+            return_exceptions=True,
+        )
+        for coin, result in zip(coins, results):
+            if isinstance(result, BaseException):
+                logger.error("Unexpected error polling %s: %s", coin, result, exc_info=result)
+
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=interval_s)
+        except asyncio.TimeoutError:
+            pass
+
+
 async def poll_bybit_oi(
     bybit: BybitClient,
     store: SQLiteDataStore,
@@ -483,10 +532,10 @@ async def poll_bybit_oi(
 ) -> None:
     """
     Poll OI from Bybit every interval_s seconds.
-    This acts as a fallback/secondary source. HL provides primary real-time OI 
-    via metaAndAssetCtxs.
+    Bybit owns bulk context hydration; Hyperliquid snapshots still mirror
+    venue-native OI for live market state.
     """
-    logger.info("Starting Bybit OI polling (fallback) every %ds", interval_s)
+    logger.info("Starting Bybit OI polling every %ds", interval_s)
 
     async def _poll_oi_one(coin: str) -> None:
         symbol = BybitClient.asset_to_symbol(coin)

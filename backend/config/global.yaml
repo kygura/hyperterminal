@@ -9,12 +9,12 @@ strategy:
   timeframe: hourly
 
 polling:
-  # Hyperliquid REST
+  # Hyperliquid venue-native REST
   funding_poll_seconds: 3600
   context_poll_seconds: 300
   trade_ws_enabled: true
 
-  # Supplemental REST data
+  # Bybit primary bulk context hydration
   bybit_ohlcv_seconds: 3600      # hourly candles
   bybit_oi_seconds: 3600         # hourly OI
   bybit_volume_seconds: 3600     # hourly spot volume
