@@ -4,11 +4,9 @@ Portfolio branching API for branch CRUD, manual trade logging, and equity curves
 from __future__ import annotations
 
 import logging
-import os
 import sqlite3
 import uuid
 from datetime import datetime, time, timedelta, timezone
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -21,6 +19,7 @@ from data.branch_yaml import (
     sync_saved_branches,
 )
 from data.price_history import get_price_dataset
+from db.paths import resolve_path_from_env
 from db.schema import apply_schema
 
 router = APIRouter(prefix="/branches", tags=["branches"])
@@ -94,13 +93,8 @@ def _resolve_entry_px(data: "TradeCreate | TradeUpdate") -> Optional[float]:
 
 
 def _branches_conn() -> sqlite3.Connection:
-    candidates = [
-        Path(os.getenv("BRANCHES_DB_PATH", "")),
-        Path(__file__).resolve().parent.parent / "data.db",
-    ]
-    db = next((p for p in candidates if str(p) and p.is_file()), None)
-    if not db:
-        db = Path(__file__).resolve().parent.parent / "data.db"
+    db = resolve_path_from_env("BRANCHES_DB_PATH")
+    db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db), check_same_thread=False, timeout=5)
     conn.row_factory = sqlite3.Row
     return conn

@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from alerts import AlertManager
 from data.bybit_client import BybitClient
 from data.hl_client.daemon_client import HLClient
+from db.paths import resolve_signal_db_path
 from db.store import SQLiteDataStore
 from engine.signal_engine import SignalEngine
 from main_daemon import (
@@ -126,7 +127,7 @@ class SignalRuntime:
         self.orderbook_snapshot_seconds = int(orderbook_config.get("snapshot_interval_seconds", 30))
         self.orderbook_depth_levels = int(orderbook_config.get("depth_levels", 10))
         self.orderflow_retention_hours = int(trade_flow_config.get("retention_hours", 48))
-        db_path = str(self.backend_root / self.global_config.get("database", {}).get("path", "data.db"))
+        db_path = str(resolve_signal_db_path(self.global_config.get("database", {}).get("path", "data.db")))
 
         self.hl_client = HLClient()
         self.bybit_client = BybitClient(

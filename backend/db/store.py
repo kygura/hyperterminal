@@ -20,11 +20,12 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from db.paths import resolve_signal_db_path
 from db.schema import apply_schema
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_DB_PATH = "data.db"
+_DEFAULT_DB_PATH = str(resolve_signal_db_path())
 
 
 def _is_valid_number(v) -> bool:

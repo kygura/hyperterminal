@@ -38,8 +38,10 @@ from typing import Callable, Optional
 import yaml
 from dotenv import load_dotenv
 
+from core.runtime import configure_logging, get_log_file
 from data.hl_client.daemon_client import HLClient
 from data.bybit_client import BybitClient
+from db.paths import resolve_signal_db_path
 from db.store import SQLiteDataStore
 from engine.signal_engine import SignalEngine, TradeCandidate
 from alerts import AlertManager
@@ -82,27 +84,11 @@ _TIMEFRAME_PROFILES = {
 # ---------------------------------------------------------------------------
 
 def setup_logging(log_level: str) -> None:
-    numeric_level = getattr(logging, log_level.upper(), logging.INFO)
-    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-
-    root = logging.getLogger()
-    root.setLevel(numeric_level)
-
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setLevel(numeric_level)
-    ch.setFormatter(fmt)
-    root.addHandler(ch)
-
-    os.makedirs("logs", exist_ok=True)
-    fh = logging.handlers.RotatingFileHandler(
-        "logs/daemon.log", maxBytes=10 * 1024 * 1024, backupCount=5
-    )
-    fh.setLevel(numeric_level)
-    fh.setFormatter(fmt)
-    root.addHandler(fh)
+    configure_logging(default_level=log_level, default_log_file=get_log_file(os.path.join("logs", "daemon.log")))
 
 
 logger = logging.getLogger("main")
+load_dotenv()
 
 
 # ---------------------------------------------------------------------------

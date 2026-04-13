@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -15,6 +16,7 @@ from api.news import router as news_router, start_news_polling
 from api.routes import router
 from api.signals import router as signals_router
 from api.telegram import router as telegram_router
+from core.runtime import configure_logging, get_cors_allowed_origins
 from data.hl_client.client import HyperliquidClient
 from db.models import Wallet
 from db.session import create_db_and_tables, engine
@@ -23,17 +25,17 @@ from engine.watcher import watcher
 from runtime.signal_runtime import SignalRuntime
 from runtime.supervisor import RuntimeSupervisor, TaskSpec
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 BACKEND_ROOT = Path(__file__).resolve().parent
+load_dotenv()
 PRICE_UPDATE_INTERVAL = int(os.getenv("PRICE_UPDATE_INTERVAL_SECONDS", "300"))
+configure_logging(default_log_file=str(BACKEND_ROOT / "logs" / "backend.log"))
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Hypertrade API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=get_cors_allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
